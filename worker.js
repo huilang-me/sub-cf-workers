@@ -9,23 +9,35 @@ export default {
       return new Response(await nginx(), {
         status: 200,
         headers: {
-            'Content-Type': 'text/html; charset=UTF-8',
+          'Content-Type': 'text/html; charset=UTF-8',
         }
       });
     }
 
-    // 读取代理列表
+    const id = parseInt(url.searchParams.get("id") || "-1");
+    const free = parseInt(url.searchParams.get("free") || "-1");
+
+    // 免费代理逻辑
+    const freeProxy = (env.FREE_PROXY || "")
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    if (!isNaN(free) && free >= 0 && free < freeProxy.length) {
+      return await handleFreeProxy(freeProxy[free]);
+    }
+
+    // 主代理逻辑
     const proxyList = (env.PROXY_LIST || "")
       .split(/\r?\n/)
       .map(line => line.trim())
       .filter(Boolean);
 
-    const id = parseInt(url.searchParams.get("id") || "-1");
     if (isNaN(id) || id < 0 || id >= proxyList.length) {
       return new Response(await nginx(), {
         status: 200,
         headers: {
-            'Content-Type': 'text/html; charset=UTF-8',
+          'Content-Type': 'text/html; charset=UTF-8',
         }
       });
     }
@@ -34,8 +46,7 @@ export default {
     const parsed = new URL(targetUrl);
     const host = parsed.hostname;
     const uuidValue = parsed.pathname.replace(/^\//, "");
-    
-    
+
     // 处理 proxyip 参数
     const proxyIpParam = url.searchParams.get("proxyip");
     if (proxyIpParam) {
@@ -45,7 +56,6 @@ export default {
         .filter(Boolean);
 
       let proxyIpValue = "";
-
       const index = parseInt(proxyIpParam);
       if (!isNaN(index) && index >= 0 && index < proxyIpList.length) {
         proxyIpValue = proxyIpList[index];
@@ -70,7 +80,7 @@ export default {
     const headers = new Headers();
     if (subscriptionInfo) headers.set("Subscription-Userinfo", subscriptionInfo);
 
-    // 获取sub参数，调用不同优选
+    // 优选逻辑
     const subParam = parseInt(url.searchParams.get("sub") || "-1");
     if (subParam > 0) {
       const subIndex = subParam - 1;
@@ -78,16 +88,35 @@ export default {
       headers.set("Content-Type", "text/plain");
       return new Response(modified, { headers });
     }
+
     return new Response(rawBody, { headers });
   }
 }
 
+// 免费代理独立处理
+async function handleFreeProxy(url) {
+  return Response.redirect(url, 301);
+  // const response = await fetch(url, {
+  //   headers: {
+  //     "User-Agent": "Shadowrocket/2678 CFNetwork/3826.400.120 Darwin/24.3.0 iPhone14,4"
+  //   }
+  // });
+
+  // const rawBody = await response.text();
+  // return new Response(rawBody, {
+  //   headers: {
+  //     "Content-Type": "text/plain"
+  //   }
+  // });
+}
+
+
+// 优选模板处理
 async function getBest(env, host, uuid, subIndex = 0) {
   const subList = (env.SUB_LIST || "")
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(Boolean);
-
   if (subIndex < 0 || subIndex >= subList.length) {
     return "无效的 sub 参数";
   }
@@ -109,9 +138,9 @@ async function getBest(env, host, uuid, subIndex = 0) {
   return modifiedBase64;
 }
 
-
+// 默认 nginx 页面
 async function nginx() {
-  const text = `
+  return `
   <!doctype html>
   <html>
   <head>
@@ -125,15 +154,12 @@ async function nginx() {
               padding: 2% 5%;
               border-radius: 10px
           }
-  
           ul {
               padding-left: 20px;
           }
-  
-              ul li {
-                  line-height: 2.3
-              }
-  
+          ul li {
+              line-height: 2.3
+          }
           a {
               color: #20a53a
           }
@@ -151,6 +177,5 @@ async function nginx() {
       </div>
   </body>
   </html>
-`
-  return text;
+  `;
 }
