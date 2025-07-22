@@ -30,10 +30,33 @@ export default {
       });
     }
 
-    const targetUrl = proxyList[id];
+    let targetUrl = proxyList[id];
     const parsed = new URL(targetUrl);
     const host = parsed.hostname;
     const uuidValue = parsed.pathname.replace(/^\//, "");
+    
+    
+    // 处理 proxyip 参数
+    const proxyIpParam = url.searchParams.get("proxyip");
+    if (proxyIpParam) {
+      const proxyIpList = (env.PROXYIP || "")
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+
+      let proxyIpValue = "";
+
+      const index = parseInt(proxyIpParam);
+      if (!isNaN(index) && index >= 0 && index < proxyIpList.length) {
+        proxyIpValue = proxyIpList[index];
+      } else {
+        proxyIpValue = proxyIpParam;
+      }
+
+      if (proxyIpValue) {
+        targetUrl += (targetUrl.includes("?") ? "&" : "?") + "proxyip=" + encodeURIComponent(proxyIpValue);
+      }
+    }
 
     const response = await fetch(targetUrl, {
       headers: {
