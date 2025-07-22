@@ -1,15 +1,17 @@
 # Cloudflare Edgetunnel Subscription Proxy
 
 这是一个基于 **Cloudflare Workers** 构建的轻量级订阅管理系统，支持根据 `uuid` 和 `id` 参数动态拉取代理链接，并根据用户参数选择优选订阅模板。适用于 Shadowrocket、V2RayN 等客户端。
+
 原理：根据参数选择对应的订阅地址，根据第三方优选订阅，传入临时参数，然后替换后改成自己的，达到隐藏真实订阅地址的目的
-最终用途：方便管理多个订阅，以及优选
+
+最终用途：方便管理多个订阅，以及优选，并显示请求统计
 
 ## 🌐 特性
 
 - ✅ 使用 URL 参数动态校验 `uuid`，增强访问控制
 - ✅ 支持多个代理订阅地址（通过环境变量管理）
 - ✅ 可选 "优选订阅" 模板（替换其中的 `tmpUuid` / `tmpHost`）
-- ✅ 自动返回 Shadowrocket 等客户端所需的 `Subscription-Userinfo` header
+- ✅ 自动返回 Shadowrocket 等客户端所需的 `Subscription-Userinfo` header，用于输出请求统计，显示于Shadowrocker
 - ✅ 未授权访问时显示自定义 Nginx 成功页面
 
 ## 环境变量说明
