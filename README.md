@@ -27,12 +27,21 @@
     https://sub.cmliussss.net/sub?uuid=tmpUuid&encryption=none&security=&sni=tmpHost&fp=randomized&type=ws&host=tmpHost&path=%2F%3Fed%3D2560&allowInsecure=1&fragment=1,40-60,30-50,tlshello
     https://owo.o00o.ooo/sub?uuid=tmpUuid&encryption=none&security=tls&sni=tmpHost&alpn=h3&fp=random&type=ws&host=tmpHost&path=%2F%3Fed%3D2560&allowInsecure=1&fragment=1,40-60,30-50,tlshello
   ```
+- PROXYIP：proxyIp 每行一个
+  ```
+    ProxyIP.US.CMLiussss.net
+    proxyip.tp27231.hbmc.net
+    kr.tp50000.netlib.re
+    tw.tp81.netlib.re
+  ```
+
 
 ## 访问链接参数
 
 - uuid: 上面的UUID变量（必填）
 - id：调用的PROXY_LIST的INDEX（必填）
 - sub：SUB_LIST的内容，0不走优选订阅，1选择第一个优选，2选择第二个优选，依次类推，默认0（非必填）
+- proxyip: 0,1,2,3分别选中PROXYIP环境变量的对应index值，非数字会直接调用参数比如proxy.abc.com。默认为空（非必填）
 
 ---
 
@@ -53,5 +62,5 @@
 9. 打开本仓库中的 `worker.js` 文件，复制其所有内容  
 10. 将复制的代码粘贴到 Cloudflare Worker 编辑器中  
 11. 点击编辑器右上角的 **「保存并部署」** 按钮
-12. 添加环境变量 `UUID`， `PROXY_LIST`， `SUB_LIST`
+12. 添加环境变量 `UUID`， `PROXY_LIST`， `SUB_LIST`， `PROXYIP`
 14. 现在你就可以访问你的 Worker 链接 如 https://xxx.xxx.workers.dev/uuid=34fbb9eb-5d6b-4d33-8f2b-d2624d048b04&id=0&sub=1
