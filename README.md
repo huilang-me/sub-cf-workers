@@ -1,4 +1,4 @@
-# Cloudflare Edgetunnel Subscription Proxy
+# Cloudflare Workers 订阅管理器
 
 这是一个基于 **Cloudflare Workers + KV 存储** 的轻量级订阅跳转系统，旨在：
 
@@ -160,6 +160,15 @@ https://mirror.host.com/free
 ```
 https://your-worker.workers.dev/{uuid}/admin
 ```
+
+---
+
+## ⚠️ 免责声明
+
+> 本项目仅供**教育、研究与安全测试**目的而设计和开发。
+> 所有跳转行为均为用户自主配置，系统本身不存储任何实际订阅内容，仅作为中转跳转用途。
+> 所有数据存储于 Cloudflare KV，**请妥善保管您的 UUID 与订阅数据**，如发生数据丢失、泄露等情况，开发者概不负责。
+> 请勿将本项目用于任何非法用途，使用者需自行承担相关责任。
 
 ---
 
