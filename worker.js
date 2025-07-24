@@ -177,7 +177,7 @@ function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, proxy_
 
 
 function renderPreviewBuilder(data) {
-  const proxyList = JSON.stringify(parseEnvList(data.proxy_list));
+  const proxyList = JSON.stringify(parseEnvList(data.proxy_list_env + '\n' + data.proxy_list));
   const freeList = JSON.stringify(parseEnvList(data.free_list));
   const subList = JSON.stringify(parseEnvList(data.sub_list));
   const proxyipList = JSON.stringify(parseEnvList(data.proxyip_list));
