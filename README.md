@@ -106,6 +106,7 @@ https://your-worker.workers.dev/{uuid}?free=0&sub=sub.example.com&proxyip=ip.exa
 5. 在左侧配置面板中添加以下环境变量：
 
    * `UUID`：你的访问密钥（必须为 URL-safe 字符串）
+   * `PROXY_LIST`: 代理地址，这里写入的话不会被前端修改
 
 6. 添加 KV 命名空间，并绑定为 `KV`（用于保存 proxy/sub 等列表）
 
