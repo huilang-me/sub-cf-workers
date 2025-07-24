@@ -9,6 +9,8 @@
 
 > ⚠️ 所有请求均需携带合法 UUID，非法访问返回伪装页或 404，防止爬虫探测和滥用。
 
+Demo: https://bk.jacob-b5b.workers.dev/b80fb800-8c2d-45b1-b667-dc609f19d23d/admin
+
 ---
 
 ## ✨ 功能特性
@@ -154,7 +156,7 @@ https://mirror.host.com/free
 
 ---
 
-## 🔧 在线管理（强烈推荐）
+## 🔧 在线管理
 
 访问以下路径可在线配置所有订阅内容：
 
