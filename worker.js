@@ -31,7 +31,13 @@ export default {
             env.KV.put("proxyip_list", formData.get("proxyip_list") || ""),
             env.KV.put("free_list", formData.get("free_list") || ""),
           ]);
-          return new Response(`保存成功`, { status: 200 });
+          return new Response("保存成功", {
+            status: 200,
+            headers: {
+              // "Content-Type": "text/plain; charset=utf-8",
+              "Refresh": "1", // 1秒后刷新当前页面
+            },
+          });          
         } catch (e) {
           return new Response(`写入失败: ${e.message}`, { status: 500 });
         }
@@ -45,9 +51,15 @@ export default {
         env.KV.get("free_list") || "",
       ]);
 
-      return new Response(renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list }), {
+      return new Response(renderAdminForm({
+        proxy_list,
+        sub_list,
+        proxyip_list,
+        free_list,
+        proxy_list_env: env.PROXY_LIST || ""
+      }), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
-      });
+      });      
     }
 
     // 正常业务逻辑 - 读取 KV 配置
@@ -56,14 +68,16 @@ export default {
     const subRaw = url.searchParams.get("sub");
     const proxyipRaw = url.searchParams.get("proxyip");
 
-    const [proxyListStr, subListStr, proxyIpListStr, freeListStr] = await Promise.all([
-      env.KV.get("proxy_list"),
-      env.KV.get("sub_list"),
-      env.KV.get("proxyip_list"),
-      env.KV.get("free_list"),
+    const [kvProxyListStr, subListStr, proxyIpListStr, freeListStr] = await Promise.all([
+      env.KV.get("proxy_list") || "",
+      env.KV.get("sub_list") || "",
+      env.KV.get("proxyip_list") || "",
+      env.KV.get("free_list") || "",
     ]);
-
+    
+    const proxyListStr = (env.PROXY_LIST || "") + "\n" + kvProxyListStr;
     const proxyList = parseEnvList(proxyListStr);
+    
     const subList = parseEnvList(subListStr);
     const proxyIpList = parseEnvList(proxyIpListStr);
     const freeList = parseEnvList(freeListStr);
@@ -156,8 +170,9 @@ function renderAdminForm(data) {
   <form method="POST">
     <label>proxy_list</label>
     <div class="tip">每行一个Workers订阅 URL</div>
+    ${data.proxy_list_env ? `<pre style="background:#f9f9f9;border:1px solid #ccc;padding:10px;border-radius:4px;color:#555;white-space:pre-wrap;margin-bottom:10px;">🌐 来自环境变量 PROXY_LIST:\n${escape(data.proxy_list_env)}</pre>` : ""}
     <textarea name="proxy_list" placeholder="https://xx.example.workers.dev/xxxxx-xxxx-xxxx-xxxx-xxxxxx\nhttps://example.com/proxy2">${escape(data.proxy_list)}</textarea>
-
+  
     <label>sub_list</label>
     <div class="tip">每行一个 sub 参数值</div>
     <textarea name="sub_list" placeholder="sub.cmliussss.net\nsub2">${escape(data.sub_list)}</textarea>
