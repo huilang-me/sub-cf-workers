@@ -1,15 +1,27 @@
-// Cloudflare Workers: 高可读性优化版
-
 export default {
   async fetch(request, env, ctx) {
+
+    // 检查关键配置
+    if (!env.UUID) {
+      return new Response(renderMissingConfigPage("环境变量 <code>UUID</code> 未设置。"), {
+        status: 500,
+        headers: htmlHeader(),
+      });
+    }
+
+    if (!env.KV || typeof env.KV.get !== "function") {
+      return new Response(renderMissingConfigPage("KV 命名空间 <code>KV</code> 未绑定或绑定错误。"), {
+        status: 500,
+        headers: htmlHeader(),
+      });
+    }
+    
     const url = new URL(request.url);
     const pathSegments = url.pathname.split("/").filter(Boolean);
     const uuid = pathSegments[0];
 
     if (!uuid || uuid !== env.UUID) {
-      return pathSegments.length === 0
-        ? new Response(await renderDefaultPage(), { status: 200, headers: htmlHeader() })
-        : new Response(await render404Page(), { status: 404, headers: htmlHeader() });
+      return new Response(await renderDefaultPage(url), { status: 404, headers: htmlHeader() });
     }
 
     if (pathSegments.length === 2 && pathSegments[1] === "admin") {
@@ -130,12 +142,17 @@ function parseIndexOrRaw(raw, list) {
 
 // -------------------- 默认页面 --------------------
 
-async function renderDefaultPage() {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>恭喜，站点创建成功！</title><style>.container{width:60%;margin:10% auto 0;background:#f0f0f0;padding:2% 5%;border-radius:10px}ul{padding-left:20px}li{line-height:2.3}a{color:#20a53a}</style></head><body><div class="container"><h1>恭喜, 站点创建成功！</h1><h3>这是默认index.html，本页面由系统自动生成</h3><ul><li>本页面在FTP根目录下的index.html</li><li>您可以修改、删除或覆盖本页面</li><li>FTP相关信息，请到“面板系统后台 &gt; FTP” 查看</li></ul></div></body></html>`;
-}
-
-async function render404Page() {
-  return `<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`;
+async function renderDefaultPage(url) {
+  const origin = url.origin;
+  return `
+    <html>
+      <head><title>欢迎</title></head>
+      <body>
+        <center>
+          请通过 ${origin}/{uuid}/admin 访问管理页面
+        </center>
+      </body>
+    </html>`;
 }
 
 // -------------------- HTML 渲染函数 --------------------
@@ -546,4 +563,18 @@ function renderCommonStyles() {
   }
 </style>
 `;
+}
+function renderMissingConfigPage(message) {
+  return `
+  <!DOCTYPE html>
+  <html><head><meta charset="UTF-8"><title>配置错误</title></head>
+  <body style="font-family: sans-serif; padding: 2rem;">
+    <h1 style="color: red;">配置错误</h1>
+    <p>${message}</p>
+    <ul>
+      <li>请确认 Wrangler 配置了所需的 <strong>环境变量</strong> 和 <strong>KV 命名空间</strong></li>
+      <li>必要环境变量: <code>UUID</code></li>
+      <li>必要 KV 命名空间: <code>KV</code></li>
+    </ul>
+  </body></html>`;
 }

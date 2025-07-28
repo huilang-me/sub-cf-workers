@@ -1,15 +1,15 @@
-# Cloudflare Workers 订阅管理器
+# Cloudflare Workers/Pages 订阅管理器
 
-这是一个基于 **Cloudflare Workers + KV 存储** 的轻量级订阅跳转系统，旨在：
+这是一个基于 **Cloudflare Workers/Pages + KV 存储** 的轻量级订阅跳转系统，旨在：
 
 * 管理多个订阅地址
 * 支持动态跳转多种代理节点
 * 提供免费订阅整合方案
 * 并通过 `/admin` 页面实现 **在线管理所有跳转源**
 
-> ⚠️ 所有请求均需携带合法 UUID，非法访问返回伪装页或 404，防止爬虫探测和滥用。
+> ⚠️ 所有请求均需携带合法 UUID。
 
-Demo: https://bk.jacob-b5b.workers.dev/b80fb800-8c2d-45b1-b667-dc609f19d23d/admin
+Demo: https://sub-cf-workers-1ct.pages.dev/b80fb800-8c2d-45b1-b667-dc609f19d23d/admin
 
 ---
 
@@ -97,22 +97,28 @@ https://your-worker.workers.dev/{uuid}?free=0&sub=sub.example.com&proxyip=ip.exa
 
 ## 🛠 部署指南（Cloudflare Workers）
 
-1. 打开 [Cloudflare Dashboard](https://dash.cloudflare.com/)
+### Workers部署方法
 
-2. 进入「Workers & Pages」> 创建应用
+   - 在 CF Worker 控制台中创建一个新的 Worker。
+   - 将 [worker.js](https://github.com/huilang-me/sub-cf-workers/blob/main/_worker.js) 的内容粘贴到 Worker 编辑器中。
+   - 绑定环境变量与KV存储
 
-3. 使用模板「Hello World」创建 Worker
+### Pages部署方法
 
-4. 将仓库中的代码复制粘贴替换默认代码
+   - 在 Github 上先 Fork 本项目，并点上 Star !!!
+   - 在 CF Pages 控制台中选择 `连接到 Git`后，选中 `sub-cf-workers`项目后点击 `开始设置`
+   - 绑定环境变量与KV存储, 重试部署
 
-5. 在左侧配置面板中添加以下环境变量：
+## 环境变量设置与KV绑定
+
+1. 在左侧配置面板中添加以下环境变量：
 
    * `UUID`：你的访问密钥（必须为 URL-safe 字符串）
    * `PROXY_LIST`: 代理地址，这里写入的话不会被前端修改
 
-6. 添加 KV 命名空间，并绑定为 `KV`（用于保存 proxy/sub 等列表）
+2. 添加 KV 命名空间，并绑定为 `KV`（用于保存 proxy/sub 等列表）
 
-7. 点击部署，访问路径如下：
+3. 点击部署，访问路径如下：
 
 ```
 https://your-worker.workers.dev/{UUID}/admin
