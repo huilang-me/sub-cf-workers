@@ -162,9 +162,7 @@ async function renderDefaultPage(url) {
     <html>
       <head><title>欢迎</title></head>
       <body>
-        <center>
-          请通过 ${origin}/{uuid}/admin 访问管理页面
-        </center>
+        <div style="background-color:#f7f7f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; height:100vh; display:flex; justify-content:center; align-items:center;"> <div style="background:white; padding:30px 40px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.05); text-align:center;"> <h1 style="font-size:1.8em; margin-bottom:12px; color:#007acc;">欢迎使用</h1> <p style="font-size:1em; color:#555;">请通过 <code style="background-color:#f0f0f0; padding:2px 6px; border-radius:4px; font-family:monospace;">${origin}/{uuid}</code> 访问管理页面</p> </div> </div>
       </body>
     </html>`;
 }
