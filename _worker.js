@@ -1,6 +1,5 @@
 export default {
   async fetch(request, env, ctx) {
-
     // 检查关键配置
     if (!env.UUID) {
       return new Response(renderMissingConfigPage("环境变量 <code>UUID</code> 未设置。"), {
@@ -17,6 +16,7 @@ export default {
     }
     
     const url = new URL(request.url);
+
     const pathSegments = url.pathname.split("/").filter(Boolean);
     const uuid = pathSegments[0];
 
@@ -24,7 +24,17 @@ export default {
       return new Response(await renderDefaultPage(url), { status: 404, headers: htmlHeader() });
     }
 
-    if (pathSegments.length === 2 && pathSegments[1] === "admin") {
+    // 返回address
+    if (url.pathname === `/${env.UUID}/add.txt`) {
+      const addData = await env.KV.get("add");
+      return new Response(addData || "", {
+        status: 200,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    // 返回管理页面
+    if (url.href === url.origin + "/" + env.UUID) {
       return await handleAdmin(request, env);
     }
 
@@ -63,6 +73,7 @@ async function handleAdmin(request, env) {
         env.KV.put("sub_list", formData.get("sub_list") || ""),
         env.KV.put("proxyip_list", formData.get("proxyip_list") || ""),
         env.KV.put("free_list", formData.get("free_list") || ""),
+        env.KV.put("add", formData.get("add") || ""),
       ]);
       return new Response("保存成功", {
         status: 200,
@@ -73,11 +84,12 @@ async function handleAdmin(request, env) {
     }
   }
 
-  const [kvProxyListStr, subListStr, proxyipListStr, freeListStr] = await Promise.all([
+  const [kvProxyListStr, subListStr, proxyipListStr, freeListStr, addStr] = await Promise.all([
     env.KV.get("proxy_list") || "",
     env.KV.get("sub_list") || "",
     env.KV.get("proxyip_list") || "",
     env.KV.get("free_list") || "",
+    env.KV.get("add") || "",
   ]);
 
   const html = renderAdminForm({
@@ -85,8 +97,10 @@ async function handleAdmin(request, env) {
     sub_list: subListStr,
     proxyip_list: proxyipListStr,
     free_list: freeListStr,
+    add: addStr,
     proxy_list_env: env.PROXY_LIST || "",
     uuid: env.UUID,
+    url: new URL(request.url)
   });
 
   return new Response(html, { headers: htmlHeader() });
@@ -158,7 +172,7 @@ async function renderDefaultPage(url) {
 // -------------------- HTML 渲染函数 --------------------
 
 // 管理后台页面渲染函数
-function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, proxy_list_env, uuid }) {
+function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, add, proxy_list_env, uuid, url }) {
   const escape = (str) => (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const renderField = (id, label, tip, value, placeholder) => `
     <label for="${id}">${label}</label>
@@ -184,6 +198,13 @@ function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, proxy_
     ${renderField("sub_list", "sub_list", "每行一个 sub 参数值", sub_list, "sub.cmliussss.net\nsub2")}
     ${renderField("proxyip_list", "proxyip_list", "每行一个 proxyip 参数值", proxyip_list, "ProxyIP.US.CMLiussss.net\nproxyip2")}
     ${renderField("free_list", "free_list", "每行一个免费订阅 URL", free_list, "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\nhttps://example.com/free2")}
+    ${renderField(
+      "add",
+      "add",
+      "每行一个地址，将暴露在 <code>" + url.href + "/add.txt</code> 接口中 暂不支持调用",
+      add,
+      "nrtcfdns.zone.id:443#优选域名1\nlaxcfdns.zone.id:443#优选域名2"
+    )}
     <button type="submit">保存修改</button>
   </form>
 
@@ -244,6 +265,10 @@ ${renderCommonStyles()}
     <label for="finalUrl" style="flex: 0 0 120px;">最终跳转地址</label>
     <input type="text" id="finalUrl" readonly aria-readonly="true" />
   </div>
+</div>
+
+<div style="text-align: center; margin-top: 40px; font-size: 0.9em; color: #888;">
+  📦 Github项目地址 <a href="https://github.com/huilang-me/sub-cf-workers" target="_blank" style="color: #007acc; text-decoration: none;">huilang-me/sub-cf-workers</a>
 </div>
 
 <script>
