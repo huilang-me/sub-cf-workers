@@ -333,12 +333,21 @@ ${renderCommonStyles()}
     if (proxyipIndex !== null) query.push("proxyip=" + proxyipIndex);
     previewUrlInput.value = previewUrl + "?" + query.join("&");
 
-    // 最终跳转地址（复用统一函数逻辑）
+    // 最终跳转地址
     const sub = subIndex !== null ? subList[subIndex] : "";
     const proxyip = proxyipIndex !== null ? proxyipList[proxyipIndex] : "";
-    const finalUrl = (${buildTargetUrl.toString()})({
-      type, mainIndex, sub, proxyip, proxyList, freeList
+
+    // （复用统一函数逻辑）
+    ${buildTargetUrl.toString()}
+    const finalUrl = buildTargetUrl({
+      type,
+      mainIndex,
+      sub,
+      proxyip,
+      proxyList,
+      freeList
     });
+  
     finalUrlInput.value = finalUrl || "";
   }
 
