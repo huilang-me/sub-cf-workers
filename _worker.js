@@ -204,7 +204,7 @@ function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, add, p
     ${renderField(
       "add",
       "add",
-      "每行一个地址，将暴露在 <code>" + url.href + "/add.txt</code> 接口中 暂不支持调用",
+      "每行一个地址，将暴露在 <code>" + url.origin + "/add.txt</code> 接口",
       add,
       "nrtcfdns.zone.id:443#优选域名1\nlaxcfdns.zone.id:443#优选域名2"
     )}
