@@ -14,10 +14,10 @@ export default {
         headers: htmlHeader(),
       });
     }
-    
+
     const url = new URL(request.url);
-    
-    // 返回address
+
+    // 返回地址列表
     if (url.pathname === `/add.txt`) {
       const addData = await env.KV.get("add");
       return new Response(addData || "", {
@@ -55,12 +55,33 @@ function parseEnvList(str) {
     .filter((line) => line !== "");
 }
 
-function appendQueryParams(baseUrl, params) {
+function parseIndexOrRaw(raw, list) {
+  if (raw === null || raw === "") return "";
+  const index = parseInt(raw);
+  return !isNaN(index) && index >= 0 && index < list.length ? list[index] : raw;
+}
+
+// -------------------- 统一生成跳转 URL --------------------
+
+function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) {
+  let baseUrl = "";
+  if (type === "proxy") {
+    if (isNaN(mainIndex) || mainIndex < 0 || mainIndex >= proxyList.length) return null;
+    baseUrl = proxyList[mainIndex];
+  } else if (type === "free") {
+    if (isNaN(mainIndex) || mainIndex < 0 || mainIndex >= freeList.length) return null;
+    baseUrl = freeList[mainIndex];
+  } else {
+    return null;
+  }
+
   baseUrl = baseUrl.split("#")[0];
+
   const query = [];
-  if (params.sub) query.push(`sub=${encodeURIComponent(params.sub)}`);
-  if (params.proxyip) query.push(`proxyip=${encodeURIComponent(params.proxyip)}`);
-  return query.length ? `${baseUrl}?${query.join("&")}` : baseUrl;
+  if (sub) query.push("sub=" + encodeURIComponent(sub));
+  if (proxyip) query.push("proxyip=" + encodeURIComponent(proxyip));
+
+  return query.length ? baseUrl + "?" + query.join("&") : baseUrl;
 }
 
 // -------------------- 管理后台逻辑 --------------------
@@ -101,7 +122,7 @@ async function handleAdmin(request, env) {
     add: addStr,
     proxy_list_env: env.PROXY_LIST || "",
     uuid: env.UUID,
-    url: new URL(request.url)
+    url: new URL(request.url),
   });
 
   return new Response(html, { headers: htmlHeader() });
@@ -111,10 +132,10 @@ async function handleAdmin(request, env) {
 
 async function handleProxy(request, env, url) {
   const { searchParams } = url;
-  const idRaw = searchParams.get("id");
+  const type = searchParams.has("free") ? "free" : "proxy";
+  const mainIndex = parseInt(searchParams.get(type === "proxy" ? "id" : "free"));
   const subRaw = searchParams.get("sub");
   const proxyipRaw = searchParams.get("proxyip");
-  const freeRaw = searchParams.get("free");
 
   const [kvProxyListStr, subListStr, proxyIpListStr, freeListStr] = await Promise.all([
     env.KV.get("proxy_list") || "",
@@ -131,28 +152,12 @@ async function handleProxy(request, env, url) {
   const sub = parseIndexOrRaw(subRaw, subList);
   const proxyip = parseIndexOrRaw(proxyipRaw, proxyIpList);
 
-  if (freeRaw !== null) {
-    const freeIndex = parseInt(freeRaw);
-    if (isNaN(freeIndex) || freeIndex < 0 || freeIndex >= freeList.length) {
-      return new Response("Invalid free index", { status: 400 });
-    }
-    const targetUrl = appendQueryParams(freeList[freeIndex], { sub, proxyip });
-    return Response.redirect(targetUrl, 302);
+  const targetUrl = buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList });
+  if (!targetUrl) {
+    return new Response("Invalid index", { status: 400 });
   }
 
-  const id = parseInt(idRaw);
-  if (isNaN(id) || id < 0 || id >= proxyList.length) {
-    return new Response("Invalid id", { status: 400 });
-  }
-
-  const targetUrl = appendQueryParams(proxyList[id], { sub, proxyip });
   return Response.redirect(targetUrl, 302);
-}
-
-function parseIndexOrRaw(raw, list) {
-  if (raw === null || raw === "") return "";
-  const index = parseInt(raw);
-  return !isNaN(index) && index >= 0 && index < list.length ? list[index] : raw;
 }
 
 // -------------------- 默认页面 --------------------
@@ -163,14 +168,18 @@ async function renderDefaultPage(url) {
     <html>
       <head><title>欢迎</title></head>
       <body>
-        <div style="background-color:#f7f7f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; height:100vh; display:flex; justify-content:center; align-items:center;"> <div style="background:white; padding:30px 40px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.05); text-align:center;"> <h1 style="font-size:1.8em; margin-bottom:12px; color:#007acc;">欢迎使用</h1> <p style="font-size:1em; color:#555;">请通过 <code style="background-color:#f0f0f0; padding:2px 6px; border-radius:4px; font-family:monospace;">${origin}/{uuid}</code> 访问管理页面</p> </div> </div>
+        <div style="background-color:#f7f7f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; height:100vh; display:flex; justify-content:center; align-items:center;"> 
+          <div style="background:white; padding:30px 40px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.05); text-align:center;"> 
+            <h1 style="font-size:1.8em; margin-bottom:12px; color:#007acc;">欢迎使用</h1> 
+            <p style="font-size:1em; color:#555;">请通过 <code style="background-color:#f0f0f0; padding:2px 6px; border-radius:4px; font-family:monospace;">${origin}/{uuid}</code> 访问管理页面</p> 
+          </div> 
+        </div>
       </body>
     </html>`;
 }
 
 // -------------------- HTML 渲染函数 --------------------
 
-// 管理后台页面渲染函数
 function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, add, proxy_list_env, uuid, url }) {
   const escape = (str) => (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const renderField = (id, label, tip, value, placeholder) => `
@@ -181,7 +190,7 @@ function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, add, p
   const proxyListNotice = proxy_list_env
     ? `<pre style="margin-bottom: 15px;">🌐 来自环境变量 PROXY_LIST:\n${escape(proxy_list_env)}</pre>`
     : "";
-  
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -211,7 +220,6 @@ function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, add, p
 </body>
 </html>`;
 }
-
 
 function renderPreviewBuilder(data) {
   const proxyList = JSON.stringify(parseEnvList(data.proxy_list_env + '\n' + data.proxy_list));
@@ -306,48 +314,32 @@ ${renderCommonStyles()}
 
   function updateUrls() {
     const type = typeSelect.value;
-    const mainIndex = mainSelect.value;
-    const subIndex = subSelect.value;
-    const proxyipIndex = proxyipSelect.value;
+    const mainIndex = parseInt(mainSelect.value);
+    const subIndex = subSelect.value ? parseInt(subSelect.value) : null;
+    const proxyipIndex = proxyipSelect.value ? parseInt(proxyipSelect.value) : null;
 
-    if (mainIndex === "") {
+    if (isNaN(mainIndex)) {
       previewUrlInput.value = "";
       finalUrlInput.value = "";
       return;
     }
 
+    // preview 地址
     let previewUrl = location.origin + "/" + uuid;
     const query = [];
+    if (type === "proxy") query.push("id=" + mainIndex);
+    else query.push("free=" + mainIndex);
+    if (subIndex !== null) query.push("sub=" + subIndex);
+    if (proxyipIndex !== null) query.push("proxyip=" + proxyipIndex);
+    previewUrlInput.value = previewUrl + "?" + query.join("&");
 
-    if (type === 'proxy') {
-      query.push("id=" + mainIndex);
-    } else {
-      query.push("free=" + mainIndex);
-    }
-
-    if (subIndex !== "") query.push("sub=" + encodeURIComponent(subIndex));
-    if (proxyipIndex !== "") query.push("proxyip=" + encodeURIComponent(proxyipIndex));
-
-    if (query.length) {
-      previewUrl += "?" + query.join("&");
-    }
-
-    previewUrlInput.value = previewUrl;
-
-    let baseUrl = "";
-    if (type === 'proxy') {
-      baseUrl = proxyList[mainIndex];
-    } else {
-      baseUrl = freeList[mainIndex];
-    }
-    baseUrl = baseUrl.split("#")[0];
-
-    const finalQuery = [];
-    if (subIndex !== "") finalQuery.push("sub=" + encodeURIComponent(subList[subIndex]));
-    if (proxyipIndex !== "") finalQuery.push("proxyip=" + encodeURIComponent(proxyipList[proxyipIndex]));
-
-    const finalUrl = finalQuery.length ? baseUrl + "?" + finalQuery.join("&") : baseUrl;
-    finalUrlInput.value = finalUrl;
+    // 最终跳转地址（复用统一函数逻辑）
+    const sub = subIndex !== null ? subList[subIndex] : "";
+    const proxyip = proxyipIndex !== null ? proxyipList[proxyipIndex] : "";
+    const finalUrl = (${buildTargetUrl.toString()})({
+      type, mainIndex, sub, proxyip, proxyList, freeList
+    });
+    finalUrlInput.value = finalUrl || "";
   }
 
   function copyUrl() {
