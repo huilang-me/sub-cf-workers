@@ -55,11 +55,6 @@ function parseEnvList(str) {
     .filter((line) => line !== "");
 }
 
-// 去除链接的#内容
-function stripHash(url) {
-  return (url || "").split("#")[0];
-}
-
 function appendQueryParams(baseUrl, params) {
   const query = [];
   if (params.sub) query.push(`sub=${encodeURIComponent(params.sub)}`);
@@ -344,8 +339,8 @@ ${renderCommonStyles()}
     } else {
       baseUrl = freeList[mainIndex];
     }
-
-    baseUrl = stripHash(baseUrl); 
+    // 去除链接的#内容=
+    baseUrl = baseUrl.split("#")[0];
 
     const finalQuery = [];
     if (subIndex !== "") finalQuery.push("sub=" + encodeURIComponent(subList[subIndex]));
