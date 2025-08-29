@@ -16,21 +16,21 @@ export default {
     }
     
     const url = new URL(request.url);
+    
+    // 返回address
+    if (url.pathname === `/add.txt`) {
+      const addData = await env.KV.get("add");
+      return new Response(addData || "", {
+        status: 200,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
 
     const pathSegments = url.pathname.split("/").filter(Boolean);
     const uuid = pathSegments[0];
 
     if (!uuid || uuid !== env.UUID) {
       return new Response(await renderDefaultPage(url), { status: 404, headers: htmlHeader() });
-    }
-
-    // 返回address
-    if (url.pathname === `/${env.UUID}/add.txt`) {
-      const addData = await env.KV.get("add");
-      return new Response(addData || "", {
-        status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-      });
     }
 
     // 返回管理页面
@@ -53,6 +53,11 @@ function parseEnvList(str) {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "");
+}
+
+// 去除链接的#内容
+function stripHash(url) {
+  return (url || "").split("#")[0];
 }
 
 function appendQueryParams(baseUrl, params) {
@@ -339,6 +344,8 @@ ${renderCommonStyles()}
     } else {
       baseUrl = freeList[mainIndex];
     }
+
+    baseUrl = stripHash(baseUrl); 
 
     const finalQuery = [];
     if (subIndex !== "") finalQuery.push("sub=" + encodeURIComponent(subList[subIndex]));
