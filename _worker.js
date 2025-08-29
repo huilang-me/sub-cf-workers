@@ -56,6 +56,7 @@ function parseEnvList(str) {
 }
 
 function appendQueryParams(baseUrl, params) {
+  baseUrl = baseUrl.split("#")[0];
   const query = [];
   if (params.sub) query.push(`sub=${encodeURIComponent(params.sub)}`);
   if (params.proxyip) query.push(`proxyip=${encodeURIComponent(params.proxyip)}`);
@@ -339,7 +340,6 @@ ${renderCommonStyles()}
     } else {
       baseUrl = freeList[mainIndex];
     }
-    // 去除链接的#内容=
     baseUrl = baseUrl.split("#")[0];
 
     const finalQuery = [];
