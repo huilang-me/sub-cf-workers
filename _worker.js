@@ -74,9 +74,13 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   } else {
     return null;
   }
-
+  
+  // 移除 URL 中的 # 及后面内容
   baseUrl = baseUrl.split("#")[0];
+  if (sub) sub = sub.split("#")[0];
+  if (proxyip) proxyip = proxyip.split("#")[0];
 
+  // 组装 URL 参数
   const query = [];
   if (sub) query.push("sub=" + encodeURIComponent(sub));
   if (proxyip) query.push("proxyip=" + encodeURIComponent(proxyip));
