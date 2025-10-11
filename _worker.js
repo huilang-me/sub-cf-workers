@@ -85,7 +85,10 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   if (sub) query.push("sub=" + encodeURIComponent(sub));
   if (proxyip) query.push("proxyip=" + encodeURIComponent(proxyip));
 
-  return query.length ? baseUrl + "?" + query.join("&") : baseUrl;
+  if (!query.length) return baseUrl;
+
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return baseUrl + separator + query.join("&");
 }
 
 // -------------------- 管理后台逻辑 --------------------
