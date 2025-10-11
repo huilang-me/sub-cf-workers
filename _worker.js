@@ -93,8 +93,8 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   }
 
   // 覆盖或添加参数
-  if (sub !== undefined) url.searchParams.set("sub", sub.split("#")[0]);
-  if (proxyip !== undefined) url.searchParams.set("proxyip", proxyip.split("#")[0]);
+  if (sub) url.searchParams.set("sub", sub.split("#")[0]);
+  if (proxyip) url.searchParams.set("proxyip", proxyip.split("#")[0]);
 
   // 拼接最终 URL
   const finalUrl =
