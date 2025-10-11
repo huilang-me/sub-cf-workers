@@ -74,21 +74,37 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   } else {
     return null;
   }
-  
-  // 移除 URL 中的 # 及后面内容
-  baseUrl = baseUrl.split("#")[0];
-  if (sub) sub = sub.split("#")[0];
-  if (proxyip) proxyip = proxyip.split("#")[0];
+
+  // 分离 URL 中的 hash
+  let hash = "";
+  const hashIndex = baseUrl.indexOf("#");
+  if (hashIndex !== -1) {
+    hash = baseUrl.slice(hashIndex);
+    baseUrl = baseUrl.slice(0, hashIndex);
+  }
+
+  // 使用 URL 对象处理参数
+  let url;
+  try {
+    url = new URL(baseUrl);
+  } catch (e) {
+    // 如果 baseUrl 不是完整 URL，则直接用字符串处理
+    url = { searchParams: new URLSearchParams(), toString: () => baseUrl };
+  }
 
   // 覆盖或添加参数
   if (sub !== undefined) url.searchParams.set("sub", sub.split("#")[0]);
   if (proxyip !== undefined) url.searchParams.set("proxyip", proxyip.split("#")[0]);
 
-  if (!query.length) return baseUrl;
+  // 拼接最终 URL
+  const finalUrl =
+    baseUrl.includes("?")
+      ? baseUrl.split("?")[0] + "?" + url.searchParams.toString() + hash
+      : baseUrl + (url.searchParams.toString() ? "?" + url.searchParams.toString() : "") + hash;
 
-  const separator = baseUrl.includes("?") ? "&" : "?";
-  return baseUrl + separator + query.join("&");
+  return finalUrl;
 }
+
 
 // -------------------- 管理后台逻辑 --------------------
 
