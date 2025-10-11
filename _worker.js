@@ -80,10 +80,9 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   if (sub) sub = sub.split("#")[0];
   if (proxyip) proxyip = proxyip.split("#")[0];
 
-  // 组装 URL 参数
-  const query = [];
-  if (sub) query.push("sub=" + encodeURIComponent(sub));
-  if (proxyip) query.push("proxyip=" + encodeURIComponent(proxyip));
+  // 覆盖或添加参数
+  if (sub !== undefined) url.searchParams.set("sub", sub.split("#")[0]);
+  if (proxyip !== undefined) url.searchParams.set("proxyip", proxyip.split("#")[0]);
 
   if (!query.length) return baseUrl;
 
