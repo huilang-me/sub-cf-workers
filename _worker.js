@@ -111,8 +111,12 @@ async function handleAdmin(request, env) {
   ]);
 
   const html = renderAdminForm({
-    proxy_list: p, sub_list: s, proxyip_list: pi, free_list: f, add: a,
-    proxy_list_env: env.PROXY_LIST || "",
+    proxy_list: p,
+    sub_list: s,
+    proxyip_list: pi,
+    free_list: f,
+    add: a,
+    proxy_list_env: env.PROXY_LIST || "", // 显式传递 PROXY_LIST 环境内容
     uuid: env.UUID,
     url: new URL(request.url)
   });
@@ -187,11 +191,14 @@ function renderLoginPage(siteKey) {
 function renderAdminForm(data) {
   const escape = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   
-  // 准备 JavaScript 预览器所需数据
   const proxyListJSON = JSON.stringify(parseEnvList(data.proxy_list_env + '\n' + data.proxy_list));
   const freeListJSON = JSON.stringify(parseEnvList(data.free_list));
   const subListJSON = JSON.stringify(parseEnvList(data.sub_list));
   const proxyipListJSON = JSON.stringify(parseEnvList(data.proxyip_list));
+
+  const proxyEnvNotice = data.proxy_list_env 
+    ? `<div class="env-notice">🌐 来自环境变量 PROXY_LIST (不可编辑):<pre>${escape(data.proxy_list_env)}</pre></div>` 
+    : "";
 
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>管理面板</title>
   <style>
@@ -200,6 +207,7 @@ function renderAdminForm(data) {
     .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 12px;border-radius:6px}
     label{display:block;font-weight:bold;margin:15px 0 5px}
     textarea{width:100%;height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace}
+    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:12px;white-space:pre-wrap}
     button.save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
     hr{margin:40px 0;border:0;border-top:1px solid #ddd}
     .container{background:#fff;padding:20px;border-radius:12px;border:1px solid #eee;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
@@ -211,12 +219,23 @@ function renderAdminForm(data) {
   <div class="header"><strong>Cloudflare Pages 管理员</strong><a href="/logout" class="logout">退出登录</a></div>
   
   <form method="POST">
-    <label>proxy_list (Workers 节点):</label><textarea name="proxy_list">${escape(data.proxy_list)}</textarea>
-    <label>sub_list (sub 参数):</label><textarea name="sub_list">${escape(data.sub_list)}</textarea>
-    <label>proxyip_list (proxyip 参数):</label><textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
-    <label>free_list (免费订阅源):</label><textarea name="free_list">${escape(data.free_list)}</textarea>
-    <label>add.txt (公开接口内容):</label><textarea name="add">${escape(data.add)}</textarea>
-    <button type="submit" class="save-btn">保存更改</button>
+    ${proxyEnvNotice}
+    <label>proxy_list (KV 存储 - 每行一个链接):</label>
+    <textarea name="proxy_list">${escape(data.proxy_list)}</textarea>
+    
+    <label>sub_list (sub 参数):</label>
+    <textarea name="sub_list">${escape(data.sub_list)}</textarea>
+    
+    <label>proxyip_list (proxyip 参数):</label>
+    <textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
+
+    <label>free_list (免费源):</label>
+    <textarea name="free_list">${escape(data.free_list)}</textarea>
+
+    <label>add.txt (公开接口内容):</label>
+    <textarea name="add">${escape(data.add)}</textarea>
+
+    <button type="submit" class="save-btn">保存所有更改</button>
   </form>
 
   <hr />
@@ -282,7 +301,6 @@ function renderAdminForm(data) {
 
       if (isNaN(mIdx)) return;
 
-      // 生成订阅地址 (跳转路径)
       let subUrl = window.location.origin + "/jump/" + uuid;
       const params = new URLSearchParams();
       if (type === 'proxy') params.set('id', mIdx); else params.set('free', mIdx);
@@ -290,7 +308,6 @@ function renderAdminForm(data) {
       if (pIdx !== null) params.set('proxyip', pIdx);
       previewUrlInput.value = subUrl + "?" + params.toString();
 
-      // 计算最终跳转目标
       let base = (type === 'proxy' ? proxyList[mIdx] : freeList[mIdx]) || "";
       try {
         let u = new URL(base.split('#')[0]);
