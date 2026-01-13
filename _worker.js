@@ -1,24 +1,11 @@
 export default {
   async fetch(request, env, ctx) {
-    // 检查关键配置
-    if (!env.UUID) {
-      return new Response(renderMissingConfigPage("环境变量 <code>UUID</code> 未设置。"), {
-        status: 500,
-        headers: htmlHeader(),
-      });
-    }
-
-    if (!env.KV || typeof env.KV.get !== "function") {
-      return new Response(renderMissingConfigPage("KV 命名空间 <code>KV</code> 未绑定或绑定错误。"), {
-        status: 500,
-        headers: htmlHeader(),
-      });
-    }
-
     const url = new URL(request.url);
+    const cookie = request.headers.get("Cookie") || "";
+    const isAuthorized = () => cookie.includes(`session=${env.AUTH_PASSWORD}`);
 
-    // 返回地址列表
-    if (url.pathname === `/add.txt`) {
+    // --- 1. 公开接口：add.txt ---
+    if (url.pathname === "/add.txt") {
       const addData = await env.KV.get("add");
       return new Response(addData || "", {
         status: 200,
@@ -26,87 +13,77 @@ export default {
       });
     }
 
-    const pathSegments = url.pathname.split("/").filter(Boolean);
-    const uuid = pathSegments[0];
-
-    if (!uuid || uuid !== env.UUID) {
-      return new Response(await renderDefaultPage(url), { status: 404, headers: htmlHeader() });
+    // --- 2. 业务跳转：UUID 路径校验 ---
+    if (url.pathname.startsWith("/jump/")) {
+      const pathSegments = url.pathname.split("/");
+      const clientUuid = pathSegments[2];
+      if (!clientUuid || clientUuid !== env.UUID) {
+        return new Response("Unauthorized: Invalid UUID", { status: 401 });
+      }
+      return await handleProxy(request, env, url);
     }
 
-    // 返回管理页面
-    if (url.href === url.origin + "/" + env.UUID) {
+    // --- 3. 登录/登出 ---
+    if (url.pathname === "/login") {
+      if (isAuthorized()) return Response.redirect(`${url.origin}/admin`, 302);
+      return await handleLogin(request, env);
+    }
+
+    if (url.pathname === "/logout") {
+      return new Response("Logged out", {
+        status: 302,
+        headers: {
+          "Set-Cookie": "session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax",
+          "Location": "/login",
+        },
+      });
+    }
+
+    // --- 4. 鉴权守卫 ---
+    if (!isAuthorized()) {
+      return Response.redirect(`${url.origin}/login`, 302);
+    }
+
+    if (url.pathname === "/" || url.pathname === "/admin") {
       return await handleAdmin(request, env);
     }
 
-    return await handleProxy(request, env, url);
+    return new Response("Not Found", { status: 404 });
   },
 };
 
-// -------------------- 工具函数 --------------------
+// -------------------- 逻辑处理模块 --------------------
 
-function htmlHeader() {
-  return { "Content-Type": "text/html; charset=utf-8" };
-}
+async function handleLogin(request, env) {
+  if (request.method === "POST") {
+    const formData = await request.formData();
+    const user = formData.get("username");
+    const pass = formData.get("password");
+    const turnstileToken = formData.get("cf-turnstile-response");
 
-function parseEnvList(str) {
-  return (str || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-}
+    if (env.TURNSTILE_SECRET_KEY) {
+      const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`,
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyData.success) return new Response("验证码校验失败", { status: 403 });
+    }
 
-function parseIndexOrRaw(raw, list) {
-  if (raw === null || raw === "") return "";
-  const index = parseInt(raw);
-  return !isNaN(index) && index >= 0 && index < list.length ? list[index] : raw;
-}
-
-// -------------------- 统一生成跳转 URL --------------------
-
-function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) {
-  let baseUrl = "";
-  if (type === "proxy") {
-    if (isNaN(mainIndex) || mainIndex < 0 || mainIndex >= proxyList.length) return null;
-    baseUrl = proxyList[mainIndex];
-  } else if (type === "free") {
-    if (isNaN(mainIndex) || mainIndex < 0 || mainIndex >= freeList.length) return null;
-    baseUrl = freeList[mainIndex];
-  } else {
-    return null;
+    if (user === env.AUTH_USERNAME && pass === env.AUTH_PASSWORD) {
+      return new Response("OK", {
+        status: 302,
+        headers: {
+          "Set-Cookie": `session=${env.AUTH_PASSWORD}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
+          "Location": "/admin",
+        },
+      });
+    }
+    return new Response("账号或密码错误", { status: 401 });
   }
-
-  // 分离 URL 中的 hash
-  let hash = "";
-  const hashIndex = baseUrl.indexOf("#");
-  if (hashIndex !== -1) {
-    hash = baseUrl.slice(hashIndex);
-    baseUrl = baseUrl.slice(0, hashIndex);
-  }
-
-  // 使用 URL 对象处理参数
-  let url;
-  try {
-    url = new URL(baseUrl);
-  } catch (e) {
-    // 如果 baseUrl 不是完整 URL，则直接用字符串处理
-    url = { searchParams: new URLSearchParams(), toString: () => baseUrl };
-  }
-
-  // 覆盖或添加参数
-  if (sub) url.searchParams.set("sub", sub.split("#")[0]);
-  if (proxyip) url.searchParams.set("proxyip", proxyip.split("#")[0]);
-
-  // 拼接最终 URL
-  const finalUrl =
-    baseUrl.includes("?")
-      ? baseUrl.split("?")[0] + "?" + url.searchParams.toString() + hash
-      : baseUrl + (url.searchParams.toString() ? "?" + url.searchParams.toString() : "") + hash;
-
-  return finalUrl;
+  return new Response(renderLoginPage(env.TURNSTILE_SITE_KEY), { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
-
-
-// -------------------- 管理后台逻辑 --------------------
 
 async function handleAdmin(request, env) {
   if (request.method === "POST") {
@@ -119,16 +96,13 @@ async function handleAdmin(request, env) {
         env.KV.put("free_list", formData.get("free_list") || ""),
         env.KV.put("add", formData.get("add") || ""),
       ]);
-      return new Response("保存成功", {
-        status: 200,
-        headers: { Refresh: "1" },
-      });
+      return new Response("保存成功", { status: 200, headers: { Refresh: "1" } });
     } catch (e) {
-      return new Response(`写入失败: ${e.message}`, { status: 500 });
+      return new Response(`保存失败: ${e.message}`, { status: 500 });
     }
   }
 
-  const [kvProxyListStr, subListStr, proxyipListStr, freeListStr, addStr] = await Promise.all([
+  const [p, s, pi, f, a] = await Promise.all([
     env.KV.get("proxy_list") || "",
     env.KV.get("sub_list") || "",
     env.KV.get("proxyip_list") || "",
@@ -137,492 +111,215 @@ async function handleAdmin(request, env) {
   ]);
 
   const html = renderAdminForm({
-    proxy_list: kvProxyListStr,
-    sub_list: subListStr,
-    proxyip_list: proxyipListStr,
-    free_list: freeListStr,
-    add: addStr,
+    proxy_list: p, sub_list: s, proxyip_list: pi, free_list: f, add: a,
     proxy_list_env: env.PROXY_LIST || "",
     uuid: env.UUID,
-    url: new URL(request.url),
+    url: new URL(request.url)
   });
-
-  return new Response(html, { headers: htmlHeader() });
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
-
-// -------------------- 业务跳转逻辑 --------------------
 
 async function handleProxy(request, env, url) {
   const { searchParams } = url;
   const type = searchParams.has("free") ? "free" : "proxy";
   const mainIndex = parseInt(searchParams.get(type === "proxy" ? "id" : "free"));
-  const subRaw = searchParams.get("sub");
-  const proxyipRaw = searchParams.get("proxyip");
-
-  const [kvProxyListStr, subListStr, proxyIpListStr, freeListStr] = await Promise.all([
+  
+  const [kvP, kvS, kvPI, kvF] = await Promise.all([
     env.KV.get("proxy_list") || "",
     env.KV.get("sub_list") || "",
     env.KV.get("proxyip_list") || "",
     env.KV.get("free_list") || "",
   ]);
 
-  const proxyList = parseEnvList((env.PROXY_LIST || "") + "\n" + kvProxyListStr);
-  const subList = parseEnvList(subListStr);
-  const proxyIpList = parseEnvList(proxyIpListStr);
-  const freeList = parseEnvList(freeListStr);
+  const proxyList = parseEnvList((env.PROXY_LIST || "") + "\n" + kvP);
+  const subList = parseEnvList(kvS);
+  const proxyIpList = parseEnvList(kvPI);
+  const freeList = parseEnvList(kvF);
 
-  const sub = parseIndexOrRaw(subRaw, subList);
-  const proxyip = parseIndexOrRaw(proxyipRaw, proxyIpList);
+  const sub = parseIndexOrRaw(searchParams.get("sub"), subList);
+  const proxyip = parseIndexOrRaw(searchParams.get("proxyip"), proxyIpList);
 
   const targetUrl = buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList });
-  if (!targetUrl) {
-    return new Response("Invalid index", { status: 400 });
-  }
-
-  return Response.redirect(targetUrl, 302);
+  return targetUrl ? Response.redirect(targetUrl, 302) : new Response("Invalid Index", { status: 400 });
 }
 
-// -------------------- 默认页面 --------------------
+// -------------------- 工具函数 --------------------
 
-async function renderDefaultPage(url) {
-  const origin = url.origin;
-  return `
-    <html>
-      <head><title>欢迎</title></head>
-      <body>
-        <div style="background-color:#f7f7f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; height:100vh; display:flex; justify-content:center; align-items:center;"> 
-          <div style="background:white; padding:30px 40px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.05); text-align:center;"> 
-            <h1 style="font-size:1.8em; margin-bottom:12px; color:#007acc;">欢迎使用</h1> 
-            <p style="font-size:1em; color:#555;">请通过 <code style="background-color:#f0f0f0; padding:2px 6px; border-radius:4px; font-family:monospace;">${origin}/{uuid}</code> 访问管理页面</p> 
-          </div> 
-        </div>
-      </body>
-    </html>`;
+function parseEnvList(str) { return (str || "").split("\n").map(l => l.trim()).filter(l => l !== ""); }
+function parseIndexOrRaw(raw, list) {
+  if (!raw) return "";
+  const i = parseInt(raw);
+  return (!isNaN(i) && i >= 0 && i < list.length) ? list[i] : raw;
 }
 
-// -------------------- HTML 渲染函数 --------------------
+function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) {
+  let baseUrl = type === "proxy" ? proxyList[mainIndex] : freeList[mainIndex];
+  if (!baseUrl) return null;
+  let hash = "";
+  const hIdx = baseUrl.indexOf("#");
+  if (hIdx !== -1) { hash = baseUrl.slice(hIdx); baseUrl = baseUrl.slice(0, hIdx); }
+  try {
+    const urlObj = new URL(baseUrl);
+    if (sub) urlObj.searchParams.set("sub", sub.split("#")[0]);
+    if (proxyip) urlObj.searchParams.set("proxyip", proxyip.split("#")[0]);
+    return urlObj.origin + urlObj.pathname + "?" + urlObj.searchParams.toString() + hash;
+  } catch (e) { return baseUrl; }
+}
 
-function renderAdminForm({ proxy_list, sub_list, proxyip_list, free_list, add, proxy_list_env, uuid, url }) {
-  const escape = (str) => (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const renderField = (id, label, tip, value, placeholder) => `
-    <label for="${id}">${label}</label>
-    <div class="tip">${tip}</div>
-    <textarea id="${id}" name="${id}" placeholder="${placeholder}">${escape(value)}</textarea>
-  `;
-  const proxyListNotice = proxy_list_env
-    ? `<pre style="margin-bottom: 15px;">🌐 来自环境变量 PROXY_LIST:\n${escape(proxy_list_env)}</pre>`
-    : "";
+// -------------------- UI 页面模板 --------------------
 
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <title>KV 数据管理面板</title>
-  ${renderCommonStyles()}
-</head>
-<body>
-  <h1>KV 数据管理面板</h1>
-  <form method="POST" autocomplete="off" spellcheck="false" novalidate>
-    ${proxyListNotice}
-    ${renderField("proxy_list", "proxy_list", "每行一个 Workers 订阅 URL", proxy_list, "https://xx.example.workers.dev/xxxxx\nhttps://example.com/proxy2")}
-    ${renderField("sub_list", "sub_list", "每行一个 sub 参数值", sub_list, "sub.cmliussss.net\nsub2")}
-    ${renderField("proxyip_list", "proxyip_list", "每行一个 proxyip 参数值", proxyip_list, "ProxyIP.US.CMLiussss.net\nproxyip2")}
-    ${renderField("free_list", "free_list", "每行一个免费订阅 URL", free_list, "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2\nhttps://example.com/free2")}
-    ${renderField(
-      "add",
-      "add",
-      "每行一个地址，将暴露在 <code>" + url.origin + "/add.txt</code> 接口",
-      add,
-      "nrtcfdns.zone.id:443#优选域名1\nlaxcfdns.zone.id:443#优选域名2"
-    )}
-    <button type="submit">保存修改</button>
+function renderLoginPage(siteKey) {
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>登录</title>
+  ${siteKey ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
+  <style>
+    body{font-family:system-ui,sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+    .card{background:#fff;padding:2rem;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.1);width:100%;max-width:350px}
+    h2{text-align:center;color:#1a73e8;margin-bottom:1.5rem}
+    input{width:100%;padding:12px;margin-bottom:1rem;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:16px}
+    button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px}
+  </style></head><body><div class="card"><h2>管理登录</h2><form method="POST">
+  <input name="username" placeholder="用户名" required autocomplete="username">
+  <input type="password" name="password" placeholder="密码" required autocomplete="current-password">
+  ${siteKey ? `<div class="cf-turnstile" data-sitekey="${siteKey}" style="display:flex;justify-content:center;margin-bottom:1rem"></div>` : ''}
+  <button type="submit">登 录</button></form></div></body></html>`;
+}
+
+function renderAdminForm(data) {
+  const escape = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  
+  // 准备 JavaScript 预览器所需数据
+  const proxyListJSON = JSON.stringify(parseEnvList(data.proxy_list_env + '\n' + data.proxy_list));
+  const freeListJSON = JSON.stringify(parseEnvList(data.free_list));
+  const subListJSON = JSON.stringify(parseEnvList(data.sub_list));
+  const proxyipListJSON = JSON.stringify(parseEnvList(data.proxyip_list));
+
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>管理面板</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#f8f9fa;font-size:14px}
+    .header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #1a73e8;padding-bottom:10px;margin-bottom:20px}
+    .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 12px;border-radius:6px}
+    label{display:block;font-weight:bold;margin:15px 0 5px}
+    textarea{width:100%;height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace}
+    button.save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
+    hr{margin:40px 0;border:0;border-top:1px solid #ddd}
+    .container{background:#fff;padding:20px;border-radius:12px;border:1px solid #eee;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
+    .form-row{display:flex;align-items:center;gap:10px;margin-bottom:15px}
+    .form-row label{flex:0 0 150px;margin:0}
+    select, input[type="text"]{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px}
+    .copy-btn{padding:8px 15px;background:#1a73e8;color:white;border:none;border-radius:6px;cursor:pointer}
+  </style></head><body>
+  <div class="header"><strong>Cloudflare Pages 管理员</strong><a href="/logout" class="logout">退出登录</a></div>
+  
+  <form method="POST">
+    <label>proxy_list (Workers 节点):</label><textarea name="proxy_list">${escape(data.proxy_list)}</textarea>
+    <label>sub_list (sub 参数):</label><textarea name="sub_list">${escape(data.sub_list)}</textarea>
+    <label>proxyip_list (proxyip 参数):</label><textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
+    <label>free_list (免费订阅源):</label><textarea name="free_list">${escape(data.free_list)}</textarea>
+    <label>add.txt (公开接口内容):</label><textarea name="add">${escape(data.add)}</textarea>
+    <button type="submit" class="save-btn">保存更改</button>
   </form>
 
-  ${renderPreviewBuilder({ proxy_list, sub_list, proxyip_list, free_list, proxy_list_env, uuid })}
-</body>
-</html>`;
-}
+  <hr />
 
-function renderPreviewBuilder(data) {
-  const proxyList = JSON.stringify(parseEnvList(data.proxy_list_env + '\n' + data.proxy_list));
-  const freeList = JSON.stringify(parseEnvList(data.free_list));
-  const subList = JSON.stringify(parseEnvList(data.sub_list));
-  const proxyipList = JSON.stringify(parseEnvList(data.proxyip_list));
-  const uuid = data.uuid || "your-uuid-here";
-
-  return `
-${renderCommonStyles()}
-
-<hr />
-<div class="container">
-  <h2>预览订阅链接生成器</h2>
-
-  <div class="form-row">
-    <label for="typeSelect">选择类型</label>
-    <select id="typeSelect" name="typeSelect" aria-label="选择类型">
-      <option value="proxy">代理订阅（id）</option>
-      <option value="free">免费订阅（free）</option>
-    </select>
+  <div class="container">
+    <h2 style="text-align:center;color:#1a73e8">预览订阅链接生成器</h2>
+    <div class="form-row">
+      <label>选择类型</label>
+      <select id="typeSelect"><option value="proxy">代理订阅 (id)</option><option value="free">免费订阅 (free)</option></select>
+    </div>
+    <div class="form-row">
+      <label>列表索引 (Index)</label>
+      <select id="mainSelect"></select>
+    </div>
+    <div class="form-row">
+      <label>sub_list (可选)</label>
+      <select id="subSelect"><option value="">不使用</option></select>
+    </div>
+    <div class="form-row">
+      <label>proxyip_list (可选)</label>
+      <select id="proxyipSelect"><option value="">不使用</option></select>
+    </div>
+    <div class="form-row">
+      <label>订阅地址</label>
+      <input type="text" id="previewUrl" readonly>
+      <button class="copy-btn" onclick="copyText('previewUrl')">复制</button>
+    </div>
+    <div class="form-row">
+      <label>最终跳转地址</label>
+      <input type="text" id="finalUrl" readonly>
+    </div>
   </div>
 
-  <div class="form-row">
-    <label for="mainSelect">proxy_list / free_list 索引</label>
-    <select id="mainSelect" name="mainSelect" aria-label="proxy_list 或 free_list 索引"></select>
-  </div>
+  <script>
+    const proxyList = ${proxyListJSON};
+    const freeList = ${freeListJSON};
+    const subList = ${subListJSON};
+    const proxyipList = ${proxyipListJSON};
+    const uuid = "${data.uuid}";
 
-  <div class="form-row">
-    <label for="subSelect">sub_list（可选）</label>
-    <select id="subSelect" name="subSelect" aria-label="sub_list 选择">
-      <option value="">不使用</option>
-    </select>
-  </div>
+    const typeSelect = document.getElementById('typeSelect');
+    const mainSelect = document.getElementById('mainSelect');
+    const subSelect = document.getElementById('subSelect');
+    const proxyipSelect = document.getElementById('proxyipSelect');
+    const previewUrlInput = document.getElementById('previewUrl');
+    const finalUrlInput = document.getElementById('finalUrl');
 
-  <div class="form-row">
-    <label for="proxyipSelect">proxyip_list（可选）</label>
-    <select id="proxyipSelect" name="proxyipSelect" aria-label="proxyip_list 选择">
-      <option value="">不使用</option>
-    </select>
-  </div>
-
-  <div class="url-section form-row" style="flex-wrap: nowrap;">
-    <label for="previewUrl" style="flex: 0 0 120px;">订阅地址</label>
-    <input type="text" id="previewUrl" readonly aria-readonly="true" />
-    <button type="button" onclick="copyUrl()" aria-label="复制">复制</button>
-  </div>
-
-  <div class="url-section form-row" style="flex-wrap: nowrap;">
-    <label for="finalUrl" style="flex: 0 0 120px;">最终跳转地址</label>
-    <input type="text" id="finalUrl" readonly aria-readonly="true" />
-  </div>
-</div>
-
-<div style="text-align: center; margin-top: 40px; font-size: 0.9em; color: #888;">
-  📦 Github项目地址 <a href="https://github.com/huilang-me/sub-cf-workers" target="_blank" style="color: #007acc; text-decoration: none;">huilang-me/sub-cf-workers</a>
-</div>
-
-<script>
-  const proxyList = ${proxyList};
-  const freeList = ${freeList};
-  const subList = ${subList};
-  const proxyipList = ${proxyipList};
-  const uuid = "${uuid}";
-
-  const typeSelect = document.getElementById('typeSelect');
-  const mainSelect = document.getElementById('mainSelect');
-  const subSelect = document.getElementById('subSelect');
-  const proxyipSelect = document.getElementById('proxyipSelect');
-  const previewUrlInput = document.getElementById('previewUrl');
-  const finalUrlInput = document.getElementById('finalUrl');
-
-  function populateSelect(select, list, includeEmpty = true) {
-    select.innerHTML = includeEmpty ? '<option value="">不使用</option>' : '';
-    list.forEach((item, i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent = i + ' - ' + item.slice(0, 50);
-      select.appendChild(opt);
-    });
-  }
-
-  function updateMainOptions() {
-    const type = typeSelect.value;
-    if (type === 'proxy') {
-      populateSelect(mainSelect, proxyList, false);
-    } else {
-      populateSelect(mainSelect, freeList, false);
-    }
-    updateUrls();
-  }
-
-  function updateUrls() {
-    const type = typeSelect.value;
-    const mainIndex = parseInt(mainSelect.value);
-    const subIndex = subSelect.value ? parseInt(subSelect.value) : null;
-    const proxyipIndex = proxyipSelect.value ? parseInt(proxyipSelect.value) : null;
-
-    if (isNaN(mainIndex)) {
-      previewUrlInput.value = "";
-      finalUrlInput.value = "";
-      return;
+    function populate(el, list, hasEmpty=true) {
+      el.innerHTML = hasEmpty ? '<option value="">不使用</option>' : '';
+      list.forEach((item, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = i + " - " + item.slice(0, 40);
+        el.appendChild(opt);
+      });
     }
 
-    // preview 地址
-    let previewUrl = location.origin + "/" + uuid;
-    const query = [];
-    if (type === "proxy") query.push("id=" + mainIndex);
-    else query.push("free=" + mainIndex);
-    if (subIndex !== null) query.push("sub=" + subIndex);
-    if (proxyipIndex !== null) query.push("proxyip=" + proxyipIndex);
-    previewUrlInput.value = previewUrl + "?" + query.join("&");
+    function update() {
+      const type = typeSelect.value;
+      const mIdx = parseInt(mainSelect.value);
+      const sIdx = subSelect.value !== "" ? parseInt(subSelect.value) : null;
+      const pIdx = proxyipSelect.value !== "" ? parseInt(proxyipSelect.value) : null;
 
-    // 最终跳转地址
-    const sub = subIndex !== null ? subList[subIndex] : "";
-    const proxyip = proxyipIndex !== null ? proxyipList[proxyipIndex] : "";
+      if (isNaN(mIdx)) return;
 
-    // （复用统一函数逻辑）
-    ${buildTargetUrl.toString()}
-    const finalUrl = buildTargetUrl({
-      type,
-      mainIndex,
-      sub,
-      proxyip,
-      proxyList,
-      freeList
-    });
-  
-    finalUrlInput.value = finalUrl || "";
-  }
+      // 生成订阅地址 (跳转路径)
+      let subUrl = window.location.origin + "/jump/" + uuid;
+      const params = new URLSearchParams();
+      if (type === 'proxy') params.set('id', mIdx); else params.set('free', mIdx);
+      if (sIdx !== null) params.set('sub', sIdx);
+      if (pIdx !== null) params.set('proxyip', pIdx);
+      previewUrlInput.value = subUrl + "?" + params.toString();
 
-  function copyUrl() {
-    previewUrlInput.select();
-    previewUrlInput.setSelectionRange(0, 99999);
-    document.execCommand('copy');
-    alert('已复制链接：' + previewUrlInput.value);
-  }
-
-  updateMainOptions();
-  populateSelect(subSelect, subList);
-  populateSelect(proxyipSelect, proxyipList);
-
-  typeSelect.addEventListener('change', updateMainOptions);
-  mainSelect.addEventListener('change', updateUrls);
-  subSelect.addEventListener('change', updateUrls);
-  proxyipSelect.addEventListener('change', updateUrls);
-</script>
-`;
-}
-
-function renderCommonStyles() {
-  return `
-<style>
-  /* 全局样式及字体 */
-  body, input, select, button, label, textarea {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-      Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-    box-sizing: border-box;
-    color: #333;
-  }
-
-  body {
-    max-width: 960px;
-    margin: 40px auto;
-    padding: 0 20px 40px;
-    background: #fff;
-    font-size:14px;
-  }
-
-  h1, h2 {
-    color: #007acc;
-  }
-
-  h1 {
-    font-weight: 700;
-    font-size: 2rem;
-    margin-bottom: 1.5rem;
-    text-align: center;
-  }
-
-  h2 {
-    margin-bottom: 20px;
-    font-weight: 600;
-    font-size: 1.5em;
-    text-align: center;
-  }
-
-  /* form 样式 */
-  form {
-    margin: 0 auto 50px;
-  }
-
-  label {
-    display: block;
-    font-weight: 600;
-    margin-bottom: 6px;
-    color: #222;
-  }
-
-  .tip {
-    font-size: 0.9em;
-    color: #666;
-    margin-bottom: 10px;
-  }
-
-  textarea {
-    width: 100%;
-    min-height: 120px;
-    padding: 10px 14px;
-    font-family: monospace;
-    font-size: 1em;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    resize: vertical;
-    transition: border-color 0.2s ease;
-  }
-  textarea:focus {
-    outline: none;
-    border-color: #007acc;
-    box-shadow: 0 0 5px rgba(0, 122, 204, 0.5);
-  }
-
-  pre {
-    background: #f9f9f9;
-    border: 1px solid #ccc;
-    padding: 12px 16px;
-    border-radius: 6px;
-    color: #555;
-    white-space: pre-wrap;
-    margin-bottom: 15px;
-    font-size: 0.95rem;
-  }
-
-  button[type="submit"], button {
-    display: inline-block;
-    padding: 6px 20px;
-    font-size: 1em;
-    font-weight: 700;
-    background-color: #007acc;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    user-select: none;
-    min-width: 80px;
-  }
-
-  button[type="submit"]:hover,
-  button[type="submit"]:focus,
-  button:hover,
-  button:focus {
-    background-color: #005fa3;
-    outline: none;
-  }
-
-  hr {
-    margin: 40px 0;
-    border: none;
-    border-top: 1px solid #ddd;
-  }
-
-  .container {
-    margin: 0 auto;
-    padding: 0 15px 30px;
-  }
-
-  .form-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 15px;
-    flex-wrap: wrap;
-  }
-
-  .form-row > label {
-    flex: 0 0 120px;
-    min-width: 100px;
-    font-weight: 600;
-    color: #333;
-  }
-
-  .form-row > select,
-  .form-row > input[type="text"] {
-    flex: 1 1 auto;
-    padding: 8px 10px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    font-size: 1em;
-    min-width: 150px;
-    transition: border-color 0.2s ease;
-  }
-  .form-row > select:focus,
-  .form-row > input[type="text"]:focus {
-    border-color: #007acc;
-    outline: none;
-    box-shadow: 0 0 6px rgba(0, 122, 204, 0.5);
-  }
-
-  .url-section {
-    margin-top: 25px;
-  }
-
-  input[readonly] {
-    background-color: #f9f9f9;
-    cursor: text;
-  }
-
-  /* 响应式布局 */
-  @media (max-width: 600px) {
-    body {
-      max-width: 100%;
-      margin: 20px;
-      padding: 0 12px 30px;
+      // 计算最终跳转目标
+      let base = (type === 'proxy' ? proxyList[mIdx] : freeList[mIdx]) || "";
+      try {
+        let u = new URL(base.split('#')[0]);
+        if (sIdx !== null) u.searchParams.set('sub', subList[sIdx].split('#')[0]);
+        if (pIdx !== null) u.searchParams.set('proxyip', proxyipList[pIdx].split('#')[0]);
+        finalUrlInput.value = u.toString() + (base.includes('#') ? '#' + base.split('#')[1] : '');
+      } catch(e) { finalUrlInput.value = base; }
     }
 
-    form,
-    .container {
-      max-width: 100%;
-      padding: 0;
+    function initMain() {
+      populate(mainSelect, typeSelect.value === 'proxy' ? proxyList : freeList, false);
+      update();
     }
 
-    .form-row {
-      flex-direction: column;
-      align-items: stretch;
+    typeSelect.onchange = initMain;
+    mainSelect.onchange = update;
+    subSelect.onchange = update;
+    proxyipSelect.onchange = update;
+
+    function copyText(id) {
+      const el = document.getElementById(id);
+      el.select();
+      document.execCommand('copy');
+      alert('已复制');
     }
 
-    .form-row > label {
-      flex: none;
-      margin-bottom: 6px;
-      width: 100%;
-    }
-
-    .form-row > select,
-    .form-row > input[type="text"],
-    textarea,
-    button {
-      width: 100%;
-      min-width: auto;
-    }
-
-    button[type="submit"] {
-      margin: 30px 0 0;
-    }
-
-    .url-section.form-row {
-      flex-wrap: nowrap;
-      flex-direction: column;
-    }
-
-    .url-section.form-row > label {
-      flex: none;
-      width: 100%;
-      margin-bottom: 6px;
-    }
-
-    .url-section.form-row > input,
-    .url-section.form-row > button {
-      width: 100%;
-      margin-top: 6px;
-      min-width: auto;
-    }
-
-    .url-section.form-row > button {
-      margin-top: 10px;
-    }
-  }
-</style>
-`;
-}
-function renderMissingConfigPage(message) {
-  return `
-  <!DOCTYPE html>
-  <html><head><meta charset="UTF-8"><title>配置错误</title></head>
-  <body style="font-family: sans-serif; padding: 2rem;">
-    <h1 style="color: red;">配置错误</h1>
-    <p>${message}</p>
-    <ul>
-      <li>请确认 Wrangler 配置了所需的 <strong>环境变量</strong> 和 <strong>KV 命名空间</strong></li>
-      <li>必要环境变量: <code>UUID</code></li>
-      <li>必要 KV 命名空间: <code>KV</code></li>
-    </ul>
+    populate(subSelect, subList);
+    populate(proxyipSelect, proxyipList);
+    initMain();
+  </script>
   </body></html>`;
 }
