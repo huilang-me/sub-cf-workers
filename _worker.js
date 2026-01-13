@@ -13,7 +13,7 @@ export default {
     const url = new URL(request.url);
     const cookie = request.headers.get("Cookie") || "";
     
-    // --- 安全鉴权函数：验证签名后的 Cookie ---
+    // 生成安全哈希签名
     const getSessionHash = async () => {
       const data = new TextEncoder().encode(`${env.AUTH_USERNAME}:${env.AUTH_PASSWORD}`);
       const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -34,7 +34,7 @@ export default {
       });
     }
 
-    // --- 2. 业务跳转：UUID 根路径校验 (域名/UUID?id=0) ---
+    // --- 2. 业务跳转：UUID 根路径校验 ---
     const clientUuid = url.pathname.split("/")[1]; 
     if (clientUuid === env.UUID && env.UUID) {
       return await handleProxy(request, env, url);
@@ -50,7 +50,6 @@ export default {
         const pass = formData.get("password");
         const turnstileToken = formData.get("cf-turnstile-response");
 
-        // 验证码校验
         if (env.TURNSTILE_SECRET_KEY) {
           const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
             method: "POST",
@@ -58,10 +57,9 @@ export default {
             body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`,
           });
           const verifyData = await verifyRes.json();
-          if (!verifyData.success) return new Response("验证码校验失败", { status: 403 });
+          if (!verifyData.success) return new Response("验证失败", { status: 403 });
         }
 
-        // 用户名密码校验
         if (user === env.AUTH_USERNAME && pass === env.AUTH_PASSWORD) {
           const sessionHash = await getSessionHash();
           return new Response("OK", {
@@ -88,7 +86,7 @@ export default {
       });
     }
 
-    // --- 5. 鉴权守卫 (针对管理后台) ---
+    // --- 5. 鉴权守卫 ---
     if (!(await isAuthorized())) {
       return Response.redirect(`${url.origin}/login`, 302);
     }
@@ -101,7 +99,7 @@ export default {
   },
 };
 
-// -------------------- 业务模块 --------------------
+// -------------------- 业务处理逻辑 --------------------
 
 async function handleAdmin(request, env) {
   if (request.method === "POST") {
@@ -116,7 +114,7 @@ async function handleAdmin(request, env) {
       ]);
       return new Response("保存成功", { status: 200, headers: { Refresh: "1" } });
     } catch (e) {
-      return new Response(`保存失败: ${e.message}`, { status: 500 });
+      return new Response(`Error: ${e.message}`, { status: 500 });
     }
   }
 
@@ -160,8 +158,6 @@ async function handleProxy(request, env, url) {
   return targetUrl ? Response.redirect(targetUrl, 302) : new Response("Invalid Index", { status: 400 });
 }
 
-// -------------------- 工具 --------------------
-
 function parseEnvList(str) { return (str || "").split("\n").map(l => l.trim()).filter(l => l !== ""); }
 function parseIndexOrRaw(raw, list) {
   if (!raw) return "";
@@ -183,22 +179,21 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   } catch (e) { return baseUrl; }
 }
 
-// -------------------- 页面 --------------------
+// -------------------- UI 模板 --------------------
 
 function renderLoginPage(siteKey) {
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>安全登录</title>
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>系统登录</title>
   ${siteKey ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
   <style>
-    body{font-family:system-ui,sans-serif;background:#f4f7f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
-    .card{background:#fff;padding:2rem;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.08);width:100%;max-width:350px}
-    h2{text-align:center;color:#1a73e8;margin-bottom:1.5rem}
+    body{font-family:system-ui,sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+    .card{background:#fff;padding:2rem;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,0.1);width:100%;max-width:350px}
     input{width:100%;padding:12px;margin-bottom:1rem;border:1px solid #ddd;border-radius:8px;box-sizing:border-box}
     button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold}
-  </style></head><body><div class="card"><h2>管理登录</h2><form method="POST">
+  </style></head><body><div class="card"><h2 style="text-align:center;color:#1a73e8">管理后台</h2><form method="POST">
   <input name="username" placeholder="用户名" required>
   <input type="password" name="password" placeholder="密码" required>
-  ${siteKey ? `<div class="cf-turnstile" data-sitekey="${siteKey}" style="display:flex;justify-content:center;margin-bottom:1rem"></div>` : ''}
-  <button type="submit">受权访问</button></form></div></body></html>`;
+  ${siteKey ? `<div class="cf-turnstile" data-sitekey="${siteKey}" data-theme="light" style="display:flex;justify-content:center;margin-bottom:1rem"></div>` : ''}
+  <button type="submit">登 录</button></form></div></body></html>`;
 }
 
 function renderAdminForm(data) {
@@ -215,12 +210,12 @@ function renderAdminForm(data) {
     .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 10px;border-radius:6px;font-size:13px}
     label{display:block;font-weight:bold;margin:15px 0 5px}
     textarea{width:100%;height:100px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:13px}
-    .hint{font-weight:normal;font-size:12px;color:#666;margin-top:2px}
     .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:11px;white-space:pre-wrap;margin:5px 0;overflow:auto;max-height:150px}
     .save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
     .container{background:#fff;padding:15px;border-radius:12px;border:1px solid #e0e0e0;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:30px}
     .form-group{margin-bottom:15px}
-    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box}
+    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;text-overflow:ellipsis}
+    option{text-overflow:ellipsis; overflow:hidden;}
     .input-with-btn{display:flex;gap:8px}
     .input-with-btn input{flex:1}
     .copy-btn{padding:0 15px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;white-space:nowrap}
@@ -234,7 +229,7 @@ function renderAdminForm(data) {
     <label>sub_list:</label><textarea name="sub_list">${escape(data.sub_list)}</textarea>
     <label>proxyip_list:</label><textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
     <label>free_list:</label><textarea name="free_list">${escape(data.free_list)}</textarea>
-    <label>add.txt: <span class="hint">每行一个地址，暴露在 <code>${data.url.origin}/add.txt</code></span></label>
+    <label>add.txt: <span style="font-weight:normal;font-size:12px;color:#666">每行一个地址，暴露在 <code>${data.url.origin}/add.txt</code></span></label>
     <textarea name="add" placeholder="地址#备注">${escape(data.add)}</textarea>
     <button type="submit" class="save-btn">保存更改</button>
   </form>
@@ -246,7 +241,7 @@ function renderAdminForm(data) {
     <div class="form-group"><label>搭配 sub_list</label><select id="subSelect"></select></div>
     <div class="form-group"><label>搭配 proxyip_list</label><select id="proxyipSelect"></select></div>
     <div class="form-group"><label>订阅地址</label><div class="input-with-btn"><input type="text" id="previewUrl" readonly><button type="button" class="copy-btn" onclick="copyText('previewUrl')">复制链接</button></div></div>
-    <div class="form-group"><label>最终跳转地址 (预览用)</label><input type="text" id="finalUrl" readonly style="background:#f0f0f0;color:#666"></div>
+    <div class="form-group"><label>最终跳转地址</label><input type="text" id="finalUrl" readonly style="background:#f0f0f0;color:#666"></div>
   </div>
 
   <script>
@@ -255,7 +250,7 @@ function renderAdminForm(data) {
 
     function fill(el, list, hasEmpty=true) {
       el.innerHTML = hasEmpty ? '<option value="">无</option>' : '';
-      list.forEach((item, i) => { const opt = document.createElement('option'); opt.value = i; opt.textContent = i + ": " + item.split('#')[0].slice(0, 30); el.appendChild(opt); });
+      list.forEach((item, i) => { const opt = document.createElement('option'); opt.value = i; opt.textContent = i + ": " + item; el.appendChild(opt); });
     }
 
     function update() {
