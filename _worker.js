@@ -1,8 +1,29 @@
+/**
+ * 环境变量要求:
+ * env.AUTH_USERNAME      - 网页登录用户名
+ * env.AUTH_PASSWORD      - 网页登录密码
+ * env.UUID               - 订阅跳转专用的 UUID
+ * env.KV                 - 绑定的 KV 命名空间
+ * env.TURNSTILE_SITE_KEY   - (可选)
+ * env.TURNSTILE_SECRET_KEY - (可选)
+ */
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const cookie = request.headers.get("Cookie") || "";
-    const isAuthorized = () => cookie.includes(`session=${env.AUTH_PASSWORD}`);
+    
+    // --- 安全鉴权函数：验证签名后的 Cookie ---
+    const getSessionHash = async () => {
+      const data = new TextEncoder().encode(`${env.AUTH_USERNAME}:${env.AUTH_PASSWORD}`);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
+    const isAuthorized = async () => {
+      const expectedHash = await getSessionHash();
+      return cookie.includes(`session=${expectedHash}`);
+    };
 
     // --- 1. 公开接口：add.txt ---
     if (url.pathname === "/add.txt") {
@@ -19,12 +40,44 @@ export default {
       return await handleProxy(request, env, url);
     }
 
-    // --- 3. 登录/登出 ---
+    // --- 3. 登录逻辑 ---
     if (url.pathname === "/login") {
-      if (isAuthorized()) return Response.redirect(`${url.origin}/admin`, 302);
-      return await handleLogin(request, env);
+      if (await isAuthorized()) return Response.redirect(`${url.origin}/admin`, 302);
+      
+      if (request.method === "POST") {
+        const formData = await request.formData();
+        const user = formData.get("username");
+        const pass = formData.get("password");
+        const turnstileToken = formData.get("cf-turnstile-response");
+
+        // 验证码校验
+        if (env.TURNSTILE_SECRET_KEY) {
+          const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`,
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyData.success) return new Response("验证码校验失败", { status: 403 });
+        }
+
+        // 用户名密码校验
+        if (user === env.AUTH_USERNAME && pass === env.AUTH_PASSWORD) {
+          const sessionHash = await getSessionHash();
+          return new Response("OK", {
+            status: 302,
+            headers: {
+              "Set-Cookie": `session=${sessionHash}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400; Secure`,
+              "Location": "/admin",
+            },
+          });
+        }
+        return new Response("账号或密码错误", { status: 401 });
+      }
+      return new Response(renderLoginPage(env.TURNSTILE_SITE_KEY), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
+    // --- 4. 登出逻辑 ---
     if (url.pathname === "/logout") {
       return new Response("Logged out", {
         status: 302,
@@ -35,8 +88,8 @@ export default {
       });
     }
 
-    // --- 4. 鉴权守卫 ---
-    if (!isAuthorized()) {
+    // --- 5. 鉴权守卫 (针对管理后台) ---
+    if (!(await isAuthorized())) {
       return Response.redirect(`${url.origin}/login`, 302);
     }
 
@@ -48,38 +101,7 @@ export default {
   },
 };
 
-// -------------------- 逻辑处理模块 --------------------
-
-async function handleLogin(request, env) {
-  if (request.method === "POST") {
-    const formData = await request.formData();
-    const user = formData.get("username");
-    const pass = formData.get("password");
-    const turnstileToken = formData.get("cf-turnstile-response");
-
-    if (env.TURNSTILE_SECRET_KEY) {
-      const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `secret=${env.TURNSTILE_SECRET_KEY}&response=${turnstileToken}`,
-      });
-      const verifyData = await verifyRes.json();
-      if (!verifyData.success) return new Response("验证码校验失败", { status: 403 });
-    }
-
-    if (user === env.AUTH_USERNAME && pass === env.AUTH_PASSWORD) {
-      return new Response("OK", {
-        status: 302,
-        headers: {
-          "Set-Cookie": `session=${env.AUTH_PASSWORD}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
-          "Location": "/admin",
-        },
-      });
-    }
-    return new Response("账号或密码错误", { status: 401 });
-  }
-  return new Response(renderLoginPage(env.TURNSTILE_SITE_KEY), { headers: { "Content-Type": "text/html; charset=utf-8" } });
-}
+// -------------------- 业务模块 --------------------
 
 async function handleAdmin(request, env) {
   if (request.method === "POST") {
@@ -138,7 +160,7 @@ async function handleProxy(request, env, url) {
   return targetUrl ? Response.redirect(targetUrl, 302) : new Response("Invalid Index", { status: 400 });
 }
 
-// -------------------- 工具函数 --------------------
+// -------------------- 工具 --------------------
 
 function parseEnvList(str) { return (str || "").split("\n").map(l => l.trim()).filter(l => l !== ""); }
 function parseIndexOrRaw(raw, list) {
@@ -161,22 +183,22 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   } catch (e) { return baseUrl; }
 }
 
-// -------------------- UI 模板 --------------------
+// -------------------- 页面 --------------------
 
 function renderLoginPage(siteKey) {
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>登录</title>
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>安全登录</title>
   ${siteKey ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
   <style>
-    body{font-family:system-ui,sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
-    .card{background:#fff;padding:2rem;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.1);width:100%;max-width:350px}
+    body{font-family:system-ui,sans-serif;background:#f4f7f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+    .card{background:#fff;padding:2rem;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.08);width:100%;max-width:350px}
     h2{text-align:center;color:#1a73e8;margin-bottom:1.5rem}
-    input{width:100%;padding:12px;margin-bottom:1rem;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:16px}
-    button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px}
+    input{width:100%;padding:12px;margin-bottom:1rem;border:1px solid #ddd;border-radius:8px;box-sizing:border-box}
+    button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold}
   </style></head><body><div class="card"><h2>管理登录</h2><form method="POST">
-  <input name="username" placeholder="用户名" required autocomplete="username">
-  <input type="password" name="password" placeholder="密码" required autocomplete="current-password">
+  <input name="username" placeholder="用户名" required>
+  <input type="password" name="password" placeholder="密码" required>
   ${siteKey ? `<div class="cf-turnstile" data-sitekey="${siteKey}" style="display:flex;justify-content:center;margin-bottom:1rem"></div>` : ''}
-  <button type="submit">登 录</button></form></div></body></html>`;
+  <button type="submit">受权访问</button></form></div></body></html>`;
 }
 
 function renderAdminForm(data) {
@@ -192,19 +214,19 @@ function renderAdminForm(data) {
     .header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #1a73e8;padding-bottom:10px;margin-bottom:20px}
     .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 10px;border-radius:6px;font-size:13px}
     label{display:block;font-weight:bold;margin:15px 0 5px}
-    textarea{width:100%;height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:13px}
+    textarea{width:100%;height:100px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:13px}
     .hint{font-weight:normal;font-size:12px;color:#666;margin-top:2px}
-    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:11px;white-space:pre-wrap;margin:5px 0;overflow:auto}
+    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:11px;white-space:pre-wrap;margin:5px 0;overflow:auto;max-height:150px}
     .save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
     .container{background:#fff;padding:15px;border-radius:12px;border:1px solid #e0e0e0;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:30px}
     .form-group{margin-bottom:15px}
-    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:14px}
+    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box}
     .input-with-btn{display:flex;gap:8px}
     .input-with-btn input{flex:1}
     .copy-btn{padding:0 15px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;white-space:nowrap}
     @media (max-width: 600px) { .input-with-btn{flex-direction:column} .copy-btn{padding:10px;width:100%} }
   </style></head><body>
-  <div class="header"><strong>配置中心</strong><a href="/logout" class="logout">退出</a></div>
+  <div class="header"><strong>配置中心</strong><a href="/logout" class="logout">退出登录</a></div>
   
   <form method="POST">
     ${data.proxy_list_env ? `<div class="env-notice"><label>环境变量 PROXY_LIST (只读):</label><pre>${escape(data.proxy_list_env)}</pre></div>` : ""}
@@ -212,10 +234,8 @@ function renderAdminForm(data) {
     <label>sub_list:</label><textarea name="sub_list">${escape(data.sub_list)}</textarea>
     <label>proxyip_list:</label><textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
     <label>free_list:</label><textarea name="free_list">${escape(data.free_list)}</textarea>
-    
-    <label>add.txt: <span class="hint">每行一个地址，将暴露在 <code>${data.url.origin}/add.txt</code> 接口</span></label>
-    <textarea name="add" placeholder="节点地址#说明">${escape(data.add)}</textarea>
-    
+    <label>add.txt: <span class="hint">每行一个地址，暴露在 <code>${data.url.origin}/add.txt</code></span></label>
+    <textarea name="add" placeholder="地址#备注">${escape(data.add)}</textarea>
     <button type="submit" class="save-btn">保存更改</button>
   </form>
 
@@ -261,7 +281,7 @@ function renderAdminForm(data) {
     fill(subSel, subList); fill(pipSel, proxyipList); fill(mainSel, proxyList, false); update();
 
     function copyText(id) {
-      const el = document.getElementById(id); el.select(); el.setSelectionRange(0, 99999);
+      const el = document.getElementById(id); el.select();
       navigator.clipboard.writeText(el.value).then(() => alert('已复制到剪贴板'));
     }
   </script>
