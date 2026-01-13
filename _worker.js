@@ -13,13 +13,10 @@ export default {
       });
     }
 
-    // --- 2. 业务跳转：UUID 路径校验 ---
-    if (url.pathname.startsWith("/jump/")) {
-      const pathSegments = url.pathname.split("/");
-      const clientUuid = pathSegments[2];
-      if (!clientUuid || clientUuid !== env.UUID) {
-        return new Response("Unauthorized: Invalid UUID", { status: 401 });
-      }
+    // --- 2. 业务跳转：回归 UUID 根路径校验 ---
+    // 格式：/你的UUID?id=0
+    const clientUuid = url.pathname.split("/")[1]; 
+    if (clientUuid === env.UUID) {
       return await handleProxy(request, env, url);
     }
 
@@ -110,17 +107,12 @@ async function handleAdmin(request, env) {
     env.KV.get("add") || "",
   ]);
 
-  const html = renderAdminForm({
-    proxy_list: p,
-    sub_list: s,
-    proxyip_list: pi,
-    free_list: f,
-    add: a,
-    proxy_list_env: env.PROXY_LIST || "", // 显式传递 PROXY_LIST 环境内容
+  return new Response(renderAdminForm({
+    proxy_list: p, sub_list: s, proxyip_list: pi, free_list: f, add: a,
+    proxy_list_env: env.PROXY_LIST || "",
     uuid: env.UUID,
     url: new URL(request.url)
-  });
-  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }), { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 async function handleProxy(request, env, url) {
@@ -170,7 +162,7 @@ function buildTargetUrl({ type, mainIndex, sub, proxyip, proxyList, freeList }) 
   } catch (e) { return baseUrl; }
 }
 
-// -------------------- UI 页面模板 --------------------
+// -------------------- UI 模板 --------------------
 
 function renderLoginPage(siteKey) {
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>登录</title>
@@ -190,82 +182,76 @@ function renderLoginPage(siteKey) {
 
 function renderAdminForm(data) {
   const escape = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  
   const proxyListJSON = JSON.stringify(parseEnvList(data.proxy_list_env + '\n' + data.proxy_list));
   const freeListJSON = JSON.stringify(parseEnvList(data.free_list));
   const subListJSON = JSON.stringify(parseEnvList(data.sub_list));
   const proxyipListJSON = JSON.stringify(parseEnvList(data.proxyip_list));
 
-  const proxyEnvNotice = data.proxy_list_env 
-    ? `<div class="env-notice">🌐 来自环境变量 PROXY_LIST (不可编辑):<pre>${escape(data.proxy_list_env)}</pre></div>` 
-    : "";
-
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>管理面板</title>
   <style>
-    body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#f8f9fa;font-size:14px}
+    body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:15px;background:#f8f9fa;font-size:14px;color:#333}
     .header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #1a73e8;padding-bottom:10px;margin-bottom:20px}
-    .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 12px;border-radius:6px}
+    .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 10px;border-radius:6px;font-size:13px}
     label{display:block;font-weight:bold;margin:15px 0 5px}
-    textarea{width:100%;height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace}
-    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:12px;white-space:pre-wrap}
-    button.save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
-    hr{margin:40px 0;border:0;border-top:1px solid #ddd}
-    .container{background:#fff;padding:20px;border-radius:12px;border:1px solid #eee;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
-    .form-row{display:flex;align-items:center;gap:10px;margin-bottom:15px}
-    .form-row label{flex:0 0 150px;margin:0}
-    select, input[type="text"]{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px}
-    .copy-btn{padding:8px 15px;background:#1a73e8;color:white;border:none;border-radius:6px;cursor:pointer}
+    textarea{width:100%;height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:13px}
+    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:11px;white-space:pre-wrap;margin:5px 0}
+    .save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
+    
+    /* 预览生成器响应式样式 */
+    .container{background:#fff;padding:15px;border-radius:12px;border:1px solid #e0e0e0;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:30px}
+    .form-group{margin-bottom:15px}
+    .form-group label{margin-bottom:6px;display:block;color:#555}
+    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:14px;background:#fff}
+    .input-with-btn{display:flex;gap:8px}
+    .input-with-btn input{flex:1}
+    .copy-btn{padding:0 15px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;white-space:nowrap}
+    
+    @media (max-width: 600px) {
+      .header h1{font-size:18px}
+      .input-with-btn{flex-direction:column}
+      .copy-btn{padding:10px;width:100%}
+    }
   </style></head><body>
-  <div class="header"><strong>Cloudflare Pages 管理员</strong><a href="/logout" class="logout">退出登录</a></div>
+  <div class="header"><strong>配置中心</strong><a href="/logout" class="logout">退出</a></div>
   
   <form method="POST">
-    ${proxyEnvNotice}
-    <label>proxy_list (KV 存储 - 每行一个链接):</label>
-    <textarea name="proxy_list">${escape(data.proxy_list)}</textarea>
-    
-    <label>sub_list (sub 参数):</label>
-    <textarea name="sub_list">${escape(data.sub_list)}</textarea>
-    
-    <label>proxyip_list (proxyip 参数):</label>
-    <textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
-
-    <label>free_list (免费源):</label>
-    <textarea name="free_list">${escape(data.free_list)}</textarea>
-
-    <label>add.txt (公开接口内容):</label>
-    <textarea name="add">${escape(data.add)}</textarea>
-
-    <button type="submit" class="save-btn">保存所有更改</button>
+    ${data.proxy_list_env ? `<div class="env-notice"><label>环境变量 PROXY_LIST (只读):</label><pre>${escape(data.proxy_list_env)}</pre></div>` : ""}
+    <label>proxy_list (KV 存储):</label><textarea name="proxy_list">${escape(data.proxy_list)}</textarea>
+    <label>sub_list:</label><textarea name="sub_list">${escape(data.sub_list)}</textarea>
+    <label>proxyip_list:</label><textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
+    <label>free_list:</label><textarea name="free_list">${escape(data.free_list)}</textarea>
+    <label>add.txt:</label><textarea name="add">${escape(data.add)}</textarea>
+    <button type="submit" class="save-btn">保存更改</button>
   </form>
 
-  <hr />
-
   <div class="container">
-    <h2 style="text-align:center;color:#1a73e8">预览订阅链接生成器</h2>
-    <div class="form-row">
-      <label>选择类型</label>
-      <select id="typeSelect"><option value="proxy">代理订阅 (id)</option><option value="free">免费订阅 (free)</option></select>
+    <h3 style="margin-top:0;color:#1a73e8">订阅预览生成器</h3>
+    <div class="form-group">
+      <label>模式</label>
+      <select id="typeSelect"><option value="proxy">节点订阅 (id)</option><option value="free">免费源 (free)</option></select>
     </div>
-    <div class="form-row">
-      <label>列表索引 (Index)</label>
+    <div class="form-group">
+      <label>选择条目</label>
       <select id="mainSelect"></select>
     </div>
-    <div class="form-row">
-      <label>sub_list (可选)</label>
-      <select id="subSelect"><option value="">不使用</option></select>
+    <div class="form-group">
+      <label>搭配 sub_list</label>
+      <select id="subSelect"></select>
     </div>
-    <div class="form-row">
-      <label>proxyip_list (可选)</label>
-      <select id="proxyipSelect"><option value="">不使用</option></select>
+    <div class="form-group">
+      <label>搭配 proxyip_list</label>
+      <select id="proxyipSelect"></select>
     </div>
-    <div class="form-row">
+    <div class="form-group">
       <label>订阅地址</label>
-      <input type="text" id="previewUrl" readonly>
-      <button class="copy-btn" onclick="copyText('previewUrl')">复制</button>
+      <div class="input-with-btn">
+        <input type="text" id="previewUrl" readonly>
+        <button type="button" class="copy-btn" onclick="copyText('previewUrl')">复制链接</button>
+      </div>
     </div>
-    <div class="form-row">
-      <label>最终跳转地址</label>
-      <input type="text" id="finalUrl" readonly>
+    <div class="form-group">
+      <label>最终跳转地址 (预览用)</label>
+      <input type="text" id="finalUrl" readonly style="background:#f0f0f0;color:#666">
     </div>
   </div>
 
@@ -276,67 +262,61 @@ function renderAdminForm(data) {
     const proxyipList = ${proxyipListJSON};
     const uuid = "${data.uuid}";
 
-    const typeSelect = document.getElementById('typeSelect');
-    const mainSelect = document.getElementById('mainSelect');
-    const subSelect = document.getElementById('subSelect');
-    const proxyipSelect = document.getElementById('proxyipSelect');
-    const previewUrlInput = document.getElementById('previewUrl');
-    const finalUrlInput = document.getElementById('finalUrl');
+    const typeSel = document.getElementById('typeSelect');
+    const mainSel = document.getElementById('mainSelect');
+    const subSel = document.getElementById('subSelect');
+    const pipSel = document.getElementById('proxyipSelect');
+    const preInp = document.getElementById('previewUrl');
+    const finInp = document.getElementById('finalUrl');
 
-    function populate(el, list, hasEmpty=true) {
-      el.innerHTML = hasEmpty ? '<option value="">不使用</option>' : '';
+    function fill(el, list, hasEmpty=true) {
+      el.innerHTML = hasEmpty ? '<option value="">无</option>' : '';
       list.forEach((item, i) => {
         const opt = document.createElement('option');
         opt.value = i;
-        opt.textContent = i + " - " + item.slice(0, 40);
+        opt.textContent = i + ": " + item.split('#')[0].slice(0, 30);
         el.appendChild(opt);
       });
     }
 
     function update() {
-      const type = typeSelect.value;
-      const mIdx = parseInt(mainSelect.value);
-      const sIdx = subSelect.value !== "" ? parseInt(subSelect.value) : null;
-      const pIdx = proxyipSelect.value !== "" ? parseInt(proxyipSelect.value) : null;
+      const type = typeSel.value;
+      const mIdx = mainSel.value;
+      const sIdx = subSel.value;
+      const pIdx = pipSel.value;
+      if (mIdx === "") return;
 
-      if (isNaN(mIdx)) return;
-
-      let subUrl = window.location.origin + "/jump/" + uuid;
+      // 订阅链接回归格式: 域名/UUID?params
+      let subUrl = window.location.origin + "/" + uuid;
       const params = new URLSearchParams();
-      if (type === 'proxy') params.set('id', mIdx); else params.set('free', mIdx);
-      if (sIdx !== null) params.set('sub', sIdx);
-      if (pIdx !== null) params.set('proxyip', pIdx);
-      previewUrlInput.value = subUrl + "?" + params.toString();
+      params.set(type === 'proxy' ? 'id' : 'free', mIdx);
+      if (sIdx !== "") params.set('sub', sIdx);
+      if (pIdx !== "") params.set('proxyip', pIdx);
+      preInp.value = subUrl + "?" + params.toString();
 
       let base = (type === 'proxy' ? proxyList[mIdx] : freeList[mIdx]) || "";
       try {
         let u = new URL(base.split('#')[0]);
-        if (sIdx !== null) u.searchParams.set('sub', subList[sIdx].split('#')[0]);
-        if (pIdx !== null) u.searchParams.set('proxyip', proxyipList[pIdx].split('#')[0]);
-        finalUrlInput.value = u.toString() + (base.includes('#') ? '#' + base.split('#')[1] : '');
-      } catch(e) { finalUrlInput.value = base; }
+        if (sIdx !== "") u.searchParams.set('sub', subList[sIdx].split('#')[0]);
+        if (pIdx !== "") u.searchParams.set('proxyip', proxyipList[pIdx].split('#')[0]);
+        finInp.value = u.toString() + (base.includes('#') ? '#' + base.split('#')[1] : '');
+      } catch(e) { finInp.value = base; }
     }
 
-    function initMain() {
-      populate(mainSelect, typeSelect.value === 'proxy' ? proxyList : freeList, false);
-      update();
-    }
+    typeSel.onchange = () => { fill(mainSel, typeSel.value==='proxy'?proxyList:freeList, false); update(); };
+    mainSel.onchange = update; subSel.onchange = update; pipSel.onchange = update;
 
-    typeSelect.onchange = initMain;
-    mainSelect.onchange = update;
-    subSelect.onchange = update;
-    proxyipSelect.onchange = update;
+    fill(subSel, subList);
+    fill(pipSel, proxyipList);
+    fill(mainSel, proxyList, false);
+    update();
 
     function copyText(id) {
       const el = document.getElementById(id);
       el.select();
-      document.execCommand('copy');
-      alert('已复制');
+      el.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(el.value).then(() => alert('已复制到剪贴板'));
     }
-
-    populate(subSelect, subList);
-    populate(proxyipSelect, proxyipList);
-    initMain();
   </script>
   </body></html>`;
 }
