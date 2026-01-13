@@ -13,10 +13,9 @@ export default {
       });
     }
 
-    // --- 2. 业务跳转：回归 UUID 根路径校验 ---
-    // 格式：/你的UUID?id=0
+    // --- 2. 业务跳转：UUID 根路径校验 (域名/UUID?id=0) ---
     const clientUuid = url.pathname.split("/")[1]; 
-    if (clientUuid === env.UUID) {
+    if (clientUuid === env.UUID && env.UUID) {
       return await handleProxy(request, env, url);
     }
 
@@ -194,106 +193,60 @@ function renderAdminForm(data) {
     .logout{color:#d93025;text-decoration:none;border:1px solid #d93025;padding:4px 10px;border-radius:6px;font-size:13px}
     label{display:block;font-weight:bold;margin:15px 0 5px}
     textarea{width:100%;height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:monospace;font-size:13px}
-    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:11px;white-space:pre-wrap;margin:5px 0}
+    .hint{font-weight:normal;font-size:12px;color:#666;margin-top:2px}
+    .env-notice pre{background:#eee;padding:10px;border-radius:6px;border:1px solid #ddd;color:#666;font-size:11px;white-space:pre-wrap;margin:5px 0;overflow:auto}
     .save-btn{background:#1a73e8;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;margin-top:20px;font-size:16px}
-    
-    /* 预览生成器响应式样式 */
     .container{background:#fff;padding:15px;border-radius:12px;border:1px solid #e0e0e0;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:30px}
     .form-group{margin-bottom:15px}
-    .form-group label{margin-bottom:6px;display:block;color:#555}
-    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:14px;background:#fff}
+    select, input[type="text"]{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:14px}
     .input-with-btn{display:flex;gap:8px}
     .input-with-btn input{flex:1}
     .copy-btn{padding:0 15px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer;white-space:nowrap}
-    
-    @media (max-width: 600px) {
-      .header h1{font-size:18px}
-      .input-with-btn{flex-direction:column}
-      .copy-btn{padding:10px;width:100%}
-    }
+    @media (max-width: 600px) { .input-with-btn{flex-direction:column} .copy-btn{padding:10px;width:100%} }
   </style></head><body>
   <div class="header"><strong>配置中心</strong><a href="/logout" class="logout">退出</a></div>
   
   <form method="POST">
     ${data.proxy_list_env ? `<div class="env-notice"><label>环境变量 PROXY_LIST (只读):</label><pre>${escape(data.proxy_list_env)}</pre></div>` : ""}
-    <label>proxy_list (KV 存储):</label><textarea name="proxy_list">${escape(data.proxy_list)}</textarea>
+    <label>proxy_list (KV 存储):</label><textarea name="proxy_list" placeholder="每行一个链接">${escape(data.proxy_list)}</textarea>
     <label>sub_list:</label><textarea name="sub_list">${escape(data.sub_list)}</textarea>
     <label>proxyip_list:</label><textarea name="proxyip_list">${escape(data.proxyip_list)}</textarea>
     <label>free_list:</label><textarea name="free_list">${escape(data.free_list)}</textarea>
-    <label>add.txt:</label><textarea name="add">${escape(data.add)}</textarea>
+    
+    <label>add.txt: <span class="hint">每行一个地址，将暴露在 <code>${data.url.origin}/add.txt</code> 接口</span></label>
+    <textarea name="add" placeholder="节点地址#说明">${escape(data.add)}</textarea>
+    
     <button type="submit" class="save-btn">保存更改</button>
   </form>
 
   <div class="container">
     <h3 style="margin-top:0;color:#1a73e8">订阅预览生成器</h3>
-    <div class="form-group">
-      <label>模式</label>
-      <select id="typeSelect"><option value="proxy">节点订阅 (id)</option><option value="free">免费源 (free)</option></select>
-    </div>
-    <div class="form-group">
-      <label>选择条目</label>
-      <select id="mainSelect"></select>
-    </div>
-    <div class="form-group">
-      <label>搭配 sub_list</label>
-      <select id="subSelect"></select>
-    </div>
-    <div class="form-group">
-      <label>搭配 proxyip_list</label>
-      <select id="proxyipSelect"></select>
-    </div>
-    <div class="form-group">
-      <label>订阅地址</label>
-      <div class="input-with-btn">
-        <input type="text" id="previewUrl" readonly>
-        <button type="button" class="copy-btn" onclick="copyText('previewUrl')">复制链接</button>
-      </div>
-    </div>
-    <div class="form-group">
-      <label>最终跳转地址 (预览用)</label>
-      <input type="text" id="finalUrl" readonly style="background:#f0f0f0;color:#666">
-    </div>
+    <div class="form-group"><label>模式</label><select id="typeSelect"><option value="proxy">节点订阅 (id)</option><option value="free">免费源 (free)</option></select></div>
+    <div class="form-group"><label>选择条目</label><select id="mainSelect"></select></div>
+    <div class="form-group"><label>搭配 sub_list</label><select id="subSelect"></select></div>
+    <div class="form-group"><label>搭配 proxyip_list</label><select id="proxyipSelect"></select></div>
+    <div class="form-group"><label>订阅地址</label><div class="input-with-btn"><input type="text" id="previewUrl" readonly><button type="button" class="copy-btn" onclick="copyText('previewUrl')">复制链接</button></div></div>
+    <div class="form-group"><label>最终跳转地址 (预览用)</label><input type="text" id="finalUrl" readonly style="background:#f0f0f0;color:#666"></div>
   </div>
 
   <script>
-    const proxyList = ${proxyListJSON};
-    const freeList = ${freeListJSON};
-    const subList = ${subListJSON};
-    const proxyipList = ${proxyipListJSON};
-    const uuid = "${data.uuid}";
-
-    const typeSel = document.getElementById('typeSelect');
-    const mainSel = document.getElementById('mainSelect');
-    const subSel = document.getElementById('subSelect');
-    const pipSel = document.getElementById('proxyipSelect');
-    const preInp = document.getElementById('previewUrl');
-    const finInp = document.getElementById('finalUrl');
+    const proxyList = ${proxyListJSON}, freeList = ${freeListJSON}, subList = ${subListJSON}, proxyipList = ${proxyipListJSON}, uuid = "${data.uuid}";
+    const typeSel = document.getElementById('typeSelect'), mainSel = document.getElementById('mainSelect'), subSel = document.getElementById('subSelect'), pipSel = document.getElementById('proxyipSelect'), preInp = document.getElementById('previewUrl'), finInp = document.getElementById('finalUrl');
 
     function fill(el, list, hasEmpty=true) {
       el.innerHTML = hasEmpty ? '<option value="">无</option>' : '';
-      list.forEach((item, i) => {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = i + ": " + item.split('#')[0].slice(0, 30);
-        el.appendChild(opt);
-      });
+      list.forEach((item, i) => { const opt = document.createElement('option'); opt.value = i; opt.textContent = i + ": " + item.split('#')[0].slice(0, 30); el.appendChild(opt); });
     }
 
     function update() {
-      const type = typeSel.value;
-      const mIdx = mainSel.value;
-      const sIdx = subSel.value;
-      const pIdx = pipSel.value;
+      const type = typeSel.value, mIdx = mainSel.value, sIdx = subSel.value, pIdx = pipSel.value;
       if (mIdx === "") return;
-
-      // 订阅链接回归格式: 域名/UUID?params
       let subUrl = window.location.origin + "/" + uuid;
       const params = new URLSearchParams();
       params.set(type === 'proxy' ? 'id' : 'free', mIdx);
       if (sIdx !== "") params.set('sub', sIdx);
       if (pIdx !== "") params.set('proxyip', pIdx);
       preInp.value = subUrl + "?" + params.toString();
-
       let base = (type === 'proxy' ? proxyList[mIdx] : freeList[mIdx]) || "";
       try {
         let u = new URL(base.split('#')[0]);
@@ -305,16 +258,10 @@ function renderAdminForm(data) {
 
     typeSel.onchange = () => { fill(mainSel, typeSel.value==='proxy'?proxyList:freeList, false); update(); };
     mainSel.onchange = update; subSel.onchange = update; pipSel.onchange = update;
-
-    fill(subSel, subList);
-    fill(pipSel, proxyipList);
-    fill(mainSel, proxyList, false);
-    update();
+    fill(subSel, subList); fill(pipSel, proxyipList); fill(mainSel, proxyList, false); update();
 
     function copyText(id) {
-      const el = document.getElementById(id);
-      el.select();
-      el.setSelectionRange(0, 99999);
+      const el = document.getElementById(id); el.select(); el.setSelectionRange(0, 99999);
       navigator.clipboard.writeText(el.value).then(() => alert('已复制到剪贴板'));
     }
   </script>
