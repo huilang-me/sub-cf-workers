@@ -1,180 +1,85 @@
-# Cloudflare Workers/Pages 订阅管理器
+# Cloudflare Pages 订阅管理系统 (安全增强版)
 
-这是一个基于 **Cloudflare Workers/Pages + KV 存储** 的轻量级订阅跳转系统，旨在：
+这是一个基于 **Cloudflare Pages + KV 存储** 的高性能、私密订阅跳转系统。它通过 Web Crypto API 实现了安全的管理后台，支持动态参数拼接与公开优选接口。
 
-* 管理多个订阅地址
-* 支持动态跳转多种代理节点
-* 提供免费订阅整合方案
-* 并通过 `/UUID` 页面实现 **在线管理所有跳转源**
+## 🚀 在线演示 (Demo)
 
-> ⚠️ 所有请求均需携带合法 UUID。
-
-Demo: https://sub-cf-workers-1ct.pages.dev/b80fb800-8c2d-45b1-b667-dc609f19d23d
+* **演示地址**: [https://sub-cf-workers-1ct.pages.dev/](https://sub-cf-workers-1ct.pages.dev)
+* **测试凭据**: 用户名 `demo` / 密码 `demo`
 
 ---
 
-## ✨ 功能特性
+## 🔧 环境变量与绑定
 
-* ✅ 使用 URL Path 中的 `uuid` 作为唯一访问凭证，未命中返回提示
-* ✅ 自动读取 KV 存储中的订阅信息，实现灵活配置
-* ✅ 支持通过 Web 表单管理所有订阅地址（/uuid）
-* ✅ 支持免费订阅一键跳转（`free_list`）
-* ✅ 支持高级组合参数：`sub`（优选模板）+ `proxyip`（IP绑定）
-* ✅ 所有跳转均为 302 重定向，客户端透明处理
-* ✅ 完整支持 Shadowrocket、V2RayN 等客户端
+在部署后的 Cloudflare 控制台，请配置以下内容：
+
+### 1. 环境变量 (Variables)
+
+| 变量名 | 必填 | 描述 |
+| --- | --- | --- |
+| `UUID` | 是 | 访问密钥（路径凭证） |
+| `AUTH_USERNAME` | 是 | 管理后台用户名 |
+| `AUTH_PASSWORD` | 是 | 管理后台密码 |
+| `PROXY_LIST` | 否 | 静态跳转列表（只读，环境变量配置） |
+| `TURNSTILE_SITE_KEY` | 否 | Turnstile 站点密钥 (Site Key) |
+| `TURNSTILE_SECRET_KEY` | 否 | Turnstile 通信密钥 (Secret Key) |
+
+### 2. KV 命名空间绑定
+
+* **变量名称**：`KV`
+* **存储内容**：`proxy_list` (动态), `sub_list`, `proxyip_list`, `free_list`, `add`。
 
 ---
 
-## 🔧 KV 键说明（部署后通过 Web 管理）
+## 🛡️ 如何获取 Turnstile 密钥 (可选但强烈建议)
 
-| KV Key         | 描述                  |
-| -------------- | ------------------- |
-| `proxy_list`   | 路由跳转目标列表，每行为一个 URL  |
-| `sub_list`     | 可选订阅模板（用于 `sub` 参数） |
-| `proxyip_list` | 可选绑定的 IP 或子域名       |
-| `free_list`    | 免费订阅源跳转目标           |
-| `add`          | 优选IP           |
+为了防止管理后台被暴力破解，建议开启 Cloudflare 免费的人机验证：
 
-可通过 Web 表单 `/your-uuid` 编辑这些内容。
+1. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)。
+2. 在左侧菜单栏点击 **Turnstile**。
+3. 点击 **Add Site**：
+* **Site Name**: 随便填写（如：MySubManager）。
+* **Domain**: 填写你的 Pages 或 Workers 域名（例如 `xxx.pages.dev`）。
+* **Widget Type**: 选择 **Managed** (推荐)。
+
+
+4. 创建完成后，你会获得：
+* **Site Key**: 填入环境变量 `TURNSTILE_SITE_KEY`。
+* **Secret Key**: 填入环境变量 `TURNSTILE_SECRET_KEY`。
+
+
+5. **重新部署** Worker/Pages 即可生效。
 
 ---
 
 ## 🧠 路由说明
 
-### `GET /{uuid}`
+### 🎯 订阅跳转：`GET /{UUID}?params`
 
-* 校验 UUID，匹配则继续处理请求，未匹配返回默认站点或 `404`
-* 支持以下 GET 参数：
+跳转地址逻辑：`域名/${UUID}?id=索引&sub=索引&proxyip=索引`
 
-| 参数        | 说明                                           |
-| --------- | -------------------------------------------- |
-| `id`      | `proxy_list` 中的跳转目标索引（必填，或使用 `free` 替代）      |
-| `sub`     | 订阅模板索引或字符串，附加为 `?sub=` 参数                    |
-| `proxyip` | IP 模板索引或字符串，附加为 `?proxyip=` 参数               |
-| `free`    | 启用免费订阅跳转（索引），此时忽略 `id`，跳转到 `free_list[n]` 地址 |
+* `id`: 对应 `PROXY_LIST` (环境变量+KV) 的索引。
+* `free`: 对应 `free_list` 的索引（启用后忽略 `id`）。
+* `sub` / `proxyip`: 匹配列表中的值或使用自定义字符串。
 
-### `GET /{uuid}`
+### 🎯 公开接口：`GET /add.txt`
 
-> 管理面板（需 UUID 匹配）
-
-* 显示并编辑 KV 中的五个列表
-* 修改后提交自动写入 KV
+* 直接返回 KV 中 `add` 键的内容，方便优选 IP 脚本调用。
 
 ---
 
-## 🧪 示例用法
+## 🛠 部署指南
 
-### 🎯 普通跳转
-
-```
-https://your-worker.workers.dev/{uuid}?id=0&sub=1&proxyip=2
-→ 跳转至 proxy_list[0]?sub=sub_list[1]&proxyip=proxyip_list[2]
-```
-
-或使用自定义值：
-
-```
-https://your-worker.workers.dev/{uuid}?id=1&sub=custom.sub.net&proxyip=ip.custom.net
-```
-
-### 🎯 Free 模式（忽略 id 参数）
-
-```
-https://your-worker.workers.dev/{uuid}?free=0&sub=sub.example.com&proxyip=ip.example.com
-→ 跳转至 free_list[0]?sub=...&proxyip=...
-```
-
----
-
-## 🛠 部署指南（Cloudflare Workers）
-
-### Workers部署方法
-
-   - 在 CF Worker 控制台中创建一个新的 Worker。
-   - 将 [worker.js](https://github.com/huilang-me/sub-cf-workers/blob/main/_worker.js) 的内容粘贴到 Worker 编辑器中。
-   - 绑定环境变量与KV存储
-
-### Pages部署方法
-
-   - 在 Github 上先 Fork 本项目，并点上 Star !!!
-   - 在 CF Pages 控制台中选择 `连接到 Git`后，选中 `sub-cf-workers`项目后点击 `开始设置`
-   - 绑定环境变量与KV存储, 重试部署
-
-## 环境变量设置与KV绑定
-
-1. 在左侧配置面板中添加以下环境变量：
-
-   * `UUID`：你的访问密钥（必须为 URL-safe 字符串）
-   * `PROXY_LIST`: 代理地址，这里写入的话不会被前端修改
-
-2. 添加 KV 命名空间，并绑定为 `KV`（用于保存 proxy/sub 等列表）
-
-3. 点击部署，访问路径如下：
-
-```
-https://your-worker.workers.dev/{UUID}
-https://your-worker.workers.dev/{UUID}?id=0&sub=1&proxyip=1
-https://your-worker.workers.dev/{UUID}?free=0
-```
-
----
-
-## 📦 示例 KV 内容格式
-
-每行一个：
-
-### proxy\_list:
-
-```
-https://sub1.example.workers.dev/xxx-xxx-xxx
-https://sub2.example.workers.dev/yyy-yyy-yyy
-```
-
-### sub\_list:
-
-```
-sub.cmliussss.net
-owo.o00o.ooo
-```
-
-### proxyip\_list:
-
-```
-ProxyIP.US.CMLiussss.net
-proxyip.example2.net
-```
-
-### free\_list:
-
-```
-https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
-https://mirror.host.com/free
-```
-
----
-
-## 🔧 在线管理
-
-访问以下路径可在线配置所有订阅内容：
-
-```
-https://your-worker.workers.dev/{uuid}
-```
+1. **Fork 本项目**。
+2. 在 Cloudflare Pages 仪表板点击 **Connect to Git**，选中项目。
+3. 在部署设置中添加环境变量，并完成 **KV 绑定**（名称必须为 `KV`）。
+4. **注意**：在 Pages 绑定 KV 时，请确保在“生产”和“预览”环境都进行了绑定。
+5. 点击部署。访问 `https://your-app.pages.dev/{UUID}` 即可看到管理面板。
 
 ---
 
 ## ⚠️ 免责声明
 
-> 本项目仅供**教育、研究与安全测试**目的而设计和开发。
-> 所有跳转行为均为用户自主配置，系统本身不存储任何实际订阅内容，仅作为中转跳转用途。
-> 所有数据存储于 Cloudflare KV，**请妥善保管您的 UUID 与订阅数据**，如发生数据丢失、泄露等情况，开发者概不负责。
-> 请勿将本项目用于任何非法用途，使用者需自行承担相关责任。
-
----
-
-## ❤️ 鸣谢与参考
-
-* [edgetunnel](https://github.com/cmliu/edgetunnel)
-* [Cloudflare Workers](https://developers.cloudflare.com/workers/)
-
----
+* 本项目仅供**教育、研究与安全测试**目的。
+* 系统仅作为跳转中转，不存储任何实际代理节点内容。
+* 请妥善保管您的 `UUID` 与管理密码，因配置泄露导致的后果由使用者自行承担。
