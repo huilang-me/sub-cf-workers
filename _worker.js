@@ -25,36 +25,48 @@ export default {
       return cookie.includes(`session=${expectedHash}`);
     };
 
-    // --- 1. 公开接口：add.txt ---
+    // --- 1. 公开接口：add.txt (带10分钟缓存机制) ---
     if (url.pathname === "/add.txt") {
+      const cacheKey = "add_processed_cache";
+      
+      // 1. 尝试从 KV 获取已缓存的最终结果
+      const cachedData = await env.KV.get(cacheKey);
+      if (cachedData) {
+        return new Response(cachedData, {
+          status: 200,
+          headers: { "Content-Type": "text/plain; charset=utf-8", "X-Cache": "HIT" },
+        });
+      }
+
+      // 2. 如果没有缓存，则执行解析逻辑
       const addData = await env.KV.get("add") || "";
       const lines = addData.split('\n');
       
       const processedLines = await Promise.all(lines.map(async (line) => {
         const trimmedLine = line.trim();
-        // 检查是否是以 http 或 https 开头的链接
         if (trimmedLine.startsWith("http://") || trimmedLine.startsWith("https://")) {
           try {
             const response = await fetch(trimmedLine, {
               headers: { "User-Agent": "Cloudflare-Worker" },
-              signal: AbortSignal.timeout(5000) // 设置5秒超时防止卡死
+              signal: AbortSignal.timeout(5000)
             });
-            if (response.ok) {
-              return await response.text();
-            }
+            if (response.ok) return await response.text();
           } catch (e) {
-            console.error(`Fetch failed for ${trimmedLine}: ${e.message}`);
-            // 如果获取失败，可以选择保留原链接或返回空
-            return ""; 
+            return ""; // 失败时跳过
           }
         }
         return line;
       }));
 
       const finalData = processedLines.join('\n');
+
+      // 3. 将结果存入 KV，设置 expirationTtl 为对应缓存秒数
+      // 注意：expirationTtl 必须大于 60 秒
+      await env.KV.put(cacheKey, finalData, { expirationTtl: 600 });
+
       return new Response(finalData, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        headers: { "Content-Type": "text/plain; charset=utf-8", "X-Cache": "MISS" },
       });
     }
 
