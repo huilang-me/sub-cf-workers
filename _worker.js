@@ -27,8 +27,32 @@ export default {
 
     // --- 1. 公开接口：add.txt ---
     if (url.pathname === "/add.txt") {
-      const addData = await env.KV.get("add");
-      return new Response(addData || "", {
+      const addData = await env.KV.get("add") || "";
+      const lines = addData.split('\n');
+      
+      const processedLines = await Promise.all(lines.map(async (line) => {
+        const trimmedLine = line.trim();
+        // 检查是否是以 http 或 https 开头的链接
+        if (trimmedLine.startsWith("http://") || trimmedLine.startsWith("https://")) {
+          try {
+            const response = await fetch(trimmedLine, {
+              headers: { "User-Agent": "Cloudflare-Worker" },
+              signal: AbortSignal.timeout(5000) // 设置5秒超时防止卡死
+            });
+            if (response.ok) {
+              return await response.text();
+            }
+          } catch (e) {
+            console.error(`Fetch failed for ${trimmedLine}: ${e.message}`);
+            // 如果获取失败，可以选择保留原链接或返回空
+            return ""; 
+          }
+        }
+        return line;
+      }));
+
+      const finalData = processedLines.join('\n');
+      return new Response(finalData, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8" },
       });
