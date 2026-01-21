@@ -25,11 +25,12 @@ export default {
       return cookie.includes(`session=${expectedHash}`);
     };
 
-    // --- 1. 公开接口：add.txt (带10分钟缓存机制) ---
+    // --- 1. 公开接口：add.txt (带缓存机制) ---
     if (url.pathname === "/add.txt") {
       const cacheKey = "add_processed_cache";
+      const cacheTTL = 600; // 缓存 10 分钟 (600秒)
       
-      // 1. 尝试从 KV 获取已缓存的最终结果
+      // 检查缓存
       const cachedData = await env.KV.get(cacheKey);
       if (cachedData) {
         return new Response(cachedData, {
@@ -38,21 +39,28 @@ export default {
         });
       }
 
-      // 2. 如果没有缓存，则执行解析逻辑
       const addData = await env.KV.get("add") || "";
       const lines = addData.split('\n');
+      let fetchSuccess = true; // 标记是否所有请求都成功
       
       const processedLines = await Promise.all(lines.map(async (line) => {
         const trimmedLine = line.trim();
-        if (trimmedLine.startsWith("http://") || trimmedLine.startsWith("https://")) {
+        if (trimmedLine.startsWith("http")) {
           try {
             const response = await fetch(trimmedLine, {
               headers: { "User-Agent": "Cloudflare-Worker" },
               signal: AbortSignal.timeout(5000)
             });
-            if (response.ok) return await response.text();
+            if (response.ok) {
+              const text = await response.text();
+              return text.trim();
+            } else {
+              fetchSuccess = false; // HTTP 状态码不是 2xx
+              return line; 
+            }
           } catch (e) {
-            return ""; // 失败时跳过
+            fetchSuccess = false; // 网络错误或超时
+            return line; 
           }
         }
         return line;
@@ -60,13 +68,17 @@ export default {
 
       const finalData = processedLines.join('\n');
 
-      // 3. 将结果存入 KV，设置 expirationTtl 为对应缓存秒数
-      // 注意：expirationTtl 必须大于 60 秒
-      await env.KV.put(cacheKey, finalData, { expirationTtl: 600 });
+      // 只有在所有 fetch 都成功的情况下才写入缓存
+      if (fetchSuccess) {
+        await env.KV.put(cacheKey, finalData, { expirationTtl: cacheTTL });
+      }
 
       return new Response(finalData, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "X-Cache": "MISS" },
+        headers: { 
+          "Content-Type": "text/plain; charset=utf-8", 
+          "X-Cache": fetchSuccess ? "MISS" : "BYPASS" // MISS 表示生成了新缓存，BYPASS 表示请求失败未缓存
+        },
       });
     }
 
@@ -147,6 +159,8 @@ async function handleAdmin(request, env) {
         env.KV.put("proxyip_list", formData.get("proxyip_list") || ""),
         env.KV.put("free_list", formData.get("free_list") || ""),
         env.KV.put("add", formData.get("add") || ""),
+        // 保存时自动删除缓存，确保下次访问 add.txt 是最新的
+        env.KV.delete("add_processed_cache"),
       ]);
       return new Response("保存成功", { status: 200, headers: { Refresh: "1" } });
     } catch (e) {
